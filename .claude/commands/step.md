@@ -60,7 +60,11 @@ Run the step's `Verification:` command. If it fails:
 - Report the failure and stop.
 - Do not auto-fix unless the fix is obviously inside the step's scope.
 
-## 7. Stop. Do not commit.
+## 7. Update the step file's Status header
+
+Once verification passes, edit the step file itself: change the `**Status:** not started` line at the top to `**Status:** done (YYYY-MM-DD)`. Use today's date. If a commit hash is available (the user has already committed), append it: `**Status:** done (YYYY-MM-DD, commit <short-sha>)`. This keeps each step file truthful about its own state — future sessions read the Status header to know where to pick up.
+
+## 8. Stop. Do not commit.
 
 Show `git status` and `git diff --stat`. The user commits, not you. The diff is the deliverable.
 

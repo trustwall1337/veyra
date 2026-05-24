@@ -1,6 +1,6 @@
 # Step 01 — Lock blocking decisions
 
-**Status:** not started
+**Status:** done (2026-05-24, commit f5534fe)
 **Maps to:** `CLAUDE.md §Currently undecided` + planner research findings on Lovable/Supabase MCP surface
 **Produces:** decision record + dependency pins in `package.json` + `CLAUDE.md` update
 **Depends on:** none
