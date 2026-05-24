@@ -221,7 +221,12 @@ The discriminated union declared in `phase-1/steps/02-foundation-types-artifact-
 
 ### 5.3 New finding-classification rule (Phase 2 only)
 
-- `confirmed_issue` is permitted when and only when an `active_validation` evidence item with `outcome: 'proven_allowed'` exists for the finding. This is the single allowed promotion from `likely_issue` to `confirmed_issue` in Phase 2. AI cannot promote classification.
+There are two distinct paths to `confirmed_issue`. They do not change each other:
+
+- **Direct deterministic evidence (unchanged from Phase 1).** Findings whose evidence is direct and unambiguous — e.g. `cc-11-7` (client-side use of privileged Supabase key, Semgrep-detected) and `cc-11-8` (hardcoded service-role key in source, Gitleaks-detected) — are emitted as `confirmed_issue` by Phase 1 agents per `FPP §11` row classifications. Phase 2 does not change this. These findings stay `confirmed_issue` whether or not active validation runs.
+- **Phase 2 promotion path (NEW).** Findings that Phase 1 emits as `likely_issue` (the heuristic-based detections — RLS off, broad policy, direct-object-access, etc.) can be **promoted** to `confirmed_issue` if and only if an `active_validation` evidence item with `outcome: 'proven_allowed'` exists for the same control. This is the single promotion path. AI cannot promote classification. Heuristic strength alone never promotes.
+
+Put another way: `confirmed_issue` is reachable either by being deterministically detected (Phase 1 path, unchanged) or by being heuristically detected and then actively shown to be exploitable (Phase 2 promotion path, new). The Phase 2 rule narrows promotion, not direct detection.
 
 ### 5.4 What does NOT change
 
@@ -288,12 +293,18 @@ Tasks are listed in dependency order. The phase-2 step files (under `phases/phas
 
 Phase 2 is done when **all** of the following hold against the extended vulnerable fixture:
 
-- A scan with `--mode sandbox_active_validation` against the disposable sandbox produces at least:
-  - For `§11.5`: `proven_allowed` on the RLS-off fixture variant (cross-tenant SELECT succeeds because RLS is disabled — proves the gap), AND `proven_denial` on the RLS-on fixture variant (cross-tenant SELECT denied — proves the control works when enabled). Two fixture variants or one parameterized variant; either is fine.
-  - One `proven_allowed` for the seeded `§11.6` `USING (true)` policy table (cross-tenant SELECT succeeds — proves the policy is broken).
-  - One `proven_allowed` for the seeded `§11.12` public bucket (anon download succeeds).
-  - One `proven_allowed` for `§11.4` client-provided `tenant_id` override.
-  - One `proven_denial` or `proven_allowed` for `§11.3` direct-object-access, depending on how the fixture is parameterized.
+- A scan with `--mode sandbox_active_validation` against the disposable sandbox produces an outcome for every catalog test (eight tests in Phase 2). Minimum expected outcomes against the seeded vulnerable fixture, by `control_id`:
+  - `cc-11-1` frontend-only protected route → `proven_allowed` on the seeded frontend-only variant (unauthenticated request succeeds and returns sensitive data).
+  - `cc-11-2` admin route without server-side check → `proven_allowed` on the seeded no-server-check variant.
+  - `cc-11-3` direct object access → `proven_allowed` on the seeded no-tenant-filter variant (or `proven_denial` if the fixture is parameterized for a server-checked variant).
+  - `cc-11-4` client-provided `tenant_id` override → `proven_allowed`.
+  - `cc-11-5` RLS on a sensitive table:
+    - `proven_allowed` on the RLS-off fixture variant (cross-tenant SELECT succeeds — proves the gap).
+    - `proven_denial` on the RLS-on fixture variant (cross-tenant SELECT denied — proves the control works when enabled).
+  - `cc-11-6` broad `USING (true)` policy → `proven_allowed`.
+  - `cc-11-9` all-authenticated policy → `proven_allowed` (synthetic actor in tenant A reads rows belonging to tenant B from a table whose policy grants all rows to `authenticated`).
+  - `cc-11-12` public storage bucket → `proven_allowed` (anonymous download succeeds).
+- Every catalog test must produce a recorded `ActiveValidationResult`. Tests that come back as `inconclusive` because of network / timing / fixture issues do not count as "outcome covered" — they require investigation, not silent acceptance.
 - `cleanup-proof.json` shows `residual_count: 0` for every resource type.
 - The report renders AI-enriched explanations under a distinct heading from deterministic findings. Each AI output has `confidence` and `uncertainty_notes`.
 - `--no-ai` produces a complete report (no AI section), and all deterministic + active findings still surface.

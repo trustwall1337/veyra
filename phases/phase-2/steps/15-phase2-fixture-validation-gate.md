@@ -20,13 +20,18 @@ The gate that says "Phase 2 is done." No new code. Run the full Mode B pipeline 
 
 All of the following hold against the extended vulnerable fixture from step 13:
 
-- `--mode sandbox_active_validation` against the sandbox produces:
-  - `proven_allowed` for the seeded `cc-11-5` RLS-OFF table variant (cross-tenant SELECT succeeds — proves the gap)
-  - `proven_denial` for the seeded `cc-11-5` RLS-ON table variant (cross-tenant SELECT denied — proves the control works when enabled); rule 2 of step 10e then computes `readiness_status: proven_in_sandbox` for that variant even though the heuristic strength was `high`
-  - `proven_allowed` for the seeded `cc-11-6` `USING (true)` policy table
-  - `proven_allowed` for the seeded `cc-11-12` public bucket (anon download)
-  - `proven_allowed` for `cc-11-4` client-tenant_id override
-  - `proven_denial` or `proven_allowed` for `cc-11-3` direct-object-access, depending on fixture variant
+- `--mode sandbox_active_validation` against the sandbox produces outcomes for **every catalog test** (one `ActiveValidationResult` per `TestPlanEntry` emitted by upstream agents). Expected outcomes by `(control_id, variant_id)`:
+  - `cc-11-1` / `frontend-only` → `proven_allowed`
+  - `cc-11-2` / `no-server-check` → `proven_allowed`
+  - `cc-11-3` / `no-tenant-filter` → `proven_allowed` (or `proven_denial` on a server-checked variant if the fixture is parameterized)
+  - `cc-11-4` / `client-provided` → `proven_allowed`
+  - `cc-11-5` / `rls-off` → `proven_allowed`
+  - `cc-11-5` / `rls-on` → `proven_denial`; rule 2 of step 10e then computes `readiness_status: proven_in_sandbox` for that variant even though heuristic strength was `high`
+  - `cc-11-6` / `using-true` → `proven_allowed`
+  - `cc-11-9` / `all-auth` → `proven_allowed`
+  - `cc-11-12` / `public-bucket` → `proven_allowed`
+- Each expected outcome is matched against `expected-outcomes.json` from step 13. The gate asserts on the `(control_id, variant_id)` tuple, not just `control_id`.
+- `inconclusive` outcomes count as a gate failure: they signal a fixture / network / timing problem that requires investigation. Do not relax `expected-outcomes.json` to accept `inconclusive` for convenience.
 - `cleanup-proof.json` shows `residual_count: 0` per resource type.
 - The report renders AI-enriched explanations under a distinct heading. Each AI output has `confidence` and `uncertainty_notes`.
 - `--no-ai` produces a complete report; deterministic + active findings still surface.
