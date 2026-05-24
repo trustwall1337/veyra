@@ -1,0 +1,17 @@
+{
+  "scannerVersion": "0.0.0-fixture",
+  "findings": [
+    {
+      "ruleId": "EXAMPLE_RULE",
+      "filePath": "src/example.ts",
+      "line": 42,
+      "description": "REDACTED — example fixture; do not put real secret-like strings here"
+    },
+    {
+      "ruleId": "EXAMPLE_RULE_2",
+      "filePath": "supabase/schema.sql",
+      "line": 117,
+      "description": "REDACTED — second example finding"
+    }
+  ]
+}

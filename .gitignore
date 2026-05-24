@@ -1,0 +1,25 @@
+.DS_Store
+node_modules/
+dist/
+.env
+.env.local
+*.log
+
+# Test/coverage output
+coverage/
+.vitest-cache/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+
+# Tool caches
+.eslintcache
+.tsbuildinfo
+
+# Internal planning docs
+phases/
+
+# Per-user Claude Code overrides (settings.json is shared and tracked)
+.claude/settings.local.json
