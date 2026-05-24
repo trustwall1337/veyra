@@ -1,6 +1,6 @@
 # Step 06 — OSV-Scanner adapter
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §7 Task 9`, §1 OSV-Scanner verified capabilities
 **Produces:** `src/scanners/osv/`
 **Depends on:** 02

@@ -1,0 +1,43 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "examples/vulnerable-lovable-supabase/package.json",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "axios",
+            "version": "0.21.0",
+            "ecosystem": "npm"
+          },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-cph5-m8f7-6c5x",
+              "summary": "Axios Cross-Site Request Forgery Vulnerability",
+              "aliases": ["CVE-2021-3749"],
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+                }
+              ]
+            },
+            {
+              "id": "GHSA-wf5p-g6vw-rhxx",
+              "summary": "Axios SSRF",
+              "aliases": ["CVE-2020-28168"],
+              "severity": [
+                { "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N" }
+              ]
+            }
+          ],
+          "groups": [
+            { "ids": ["GHSA-cph5-m8f7-6c5x"], "aliases": ["CVE-2021-3749"] }
+          ]
+        }
+      ]
+    }
+  ]
+}
