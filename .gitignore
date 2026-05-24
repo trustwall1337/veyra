@@ -18,8 +18,5 @@ coverage/
 .eslintcache
 .tsbuildinfo
 
-# Internal planning docs
-phases/
-
 # Per-user Claude Code overrides (settings.json is shared and tracked)
 .claude/settings.local.json
