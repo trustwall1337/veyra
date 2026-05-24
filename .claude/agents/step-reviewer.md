@@ -81,12 +81,24 @@ Use exactly this structure. Be terse. No filler. Quote line numbers everywhere.
 - Big-picture rules applied: extensibility (§2A), output language (§9), secrets, MCP, typing, validation-policy seam.
 
 **MUST-fix** (real violations; block commit)
-- `<file:line>` — one sentence describing the violation. Cite the rule (e.g. "violates `FPP §2A` rule 1: hardcoded `'lovable' | 'supabase'` in shared type at this line").
-- If none: write "None."
+
+Each finding uses this exact three-line shape so the caller can act on it:
+
+- `<file:line>`
+  - **Violation:** one sentence describing what's wrong. Cite the rule (e.g. "`FPP §2A` rule 1 — hardcoded `'lovable' | 'supabase'` in a shared type").
+  - **How to fix:** one sentence describing the minimal correction (e.g. "replace the union with `ConnectorId` from `src/types/identity.ts`; the registry already knows the runtime values").
+
+If none: write "None."
 
 **SHOULD-consider** (improvements or drift risks)
-- `<file:line>` — one sentence with the tradeoff named (e.g. "the missing test for the `inconclusive` outcome path means a regression there would land silently — adding it costs little").
-- If none: write "None."
+
+Same three-line shape:
+
+- `<file:line>`
+  - **Concern:** one sentence with the tradeoff named.
+  - **How to address:** one sentence; OK to say "defer to a follow-up" if the right move is to file it for later.
+
+If none: write "None."
 
 **Looks clean**
 - One paragraph (3–5 sentences). What the implementation got right, in plain language. Do NOT use forbidden vocabulary ("secure," "safe," "compliant").

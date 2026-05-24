@@ -147,33 +147,87 @@ These are scoped helpers, not the full review. The full review happens in §6.5 
 
 Do not auto-fix unless the fix is obviously inside the step's scope and you can name the fix in one sentence.
 
-## 6.5 Get an end-to-end review from `step-reviewer`
+## 6.5 Mandatory end-to-end review by `step-reviewer`
 
-After verification passes, **spawn the `step-reviewer` subagent** to review the diff against three layers of context at once:
+**This section is NOT optional. The `/step` skill MUST NOT proceed to §7 (Status update) without completing §6.5. Skipping the review is a violation of the skill contract.**
 
-- **Narrow:** the step file (this step's contract — `What lands:`, `Done when:`, `Guardrails:`).
-- **Medium:** the phase plan section(s) the step's `Maps to:` references.
-- **Wide:** the big picture — extensibility-first architecture (`FPP §2A`), allowed-claims vocabulary (`§9`), trust model (`§18` not-required, `§10` finding model), typing discipline, MCP / secrets discipline.
+After verification passes:
 
-This is broader than `plan-adherence` (which only checks the phase plan) and broader than `output-language-lint` / `mcp-policy-check` (which each check one narrow rule). `step-reviewer` reads all three layers and reports adherence vs drift.
+### 6.5.1 Spawn the agent (required)
 
-### Hand the review to the user
+Spawn the `step-reviewer` subagent with the step number. The agent reads the step file, the phase plan section(s) named in `Maps to:`, and the big-picture rules (`FPP §2A` extensibility, `§9` allowed-claims, `§18` not-required, `§10` finding model, MCP discipline, secrets discipline, typing discipline) — then reviews the diff against all three layers.
 
-Quote the agent's report back verbatim under a heading **"Step review report"**, then act on its `Recommendation:`:
+Quote the agent's full report back to the user verbatim under the heading **"Step review report"**. Do not summarise it; the user needs the unedited report.
 
-- **`ship as-is`** — surface the agent's "Looks clean" paragraph in your summary and proceed to §7.
-- **`fix MUST-items, then ship`** — STOP. Do not update Status. Show the MUST-fix list to the user. Ask whether to fix (re-enter §5 Implement for the named items only) or to scope back. Either way, re-run §6 verification and §6.5 review after any fix.
-- **`scope back, surface to user`** — STOP. The step grew beyond its contract. Ask the user how to proceed before any further change.
+### 6.5.2 Resolve every finding (do not just show the list)
 
-### If `step-reviewer` is unavailable
+For each `MUST-fix` and `SHOULD-consider` finding in the report, take ONE of the following actions. Default presumption: **reviewer findings are valid unless a specific rule lets you reject.** Document your choice next to the finding.
 
-Fall back to running `plan-adherence` (narrower scope) and note explicitly in your summary that you ran the fallback, not the full review. Do not silently skip — the review is not optional.
+- **Apply.** Make the fix described in the finding's `How to fix:` line. Use the same Edit/Write discipline as §5. Mark the finding `[APPLIED: <one-line description of the actual change>]`.
+- **Reject with reason.** Allowed only if one of these specifically holds:
+  - The finding contradicts the step file's explicit scope (cite the line in the step file).
+  - The finding misreads the diff (cite the actual diff content).
+  - The finding asks for work outside the step's allowed surface (cite which rule limits scope).
+  - The finding contradicts a settled decision in `phases/phase-N/decisions.md` or the step 01 record (cite the decision).
+  Mark the finding `[REJECTED: <one-sentence reason citing specifically what is wrong>]`. If you cannot name what is specifically wrong in one sentence, you cannot reject — apply or surface.
+- **Surface to user.** When you are genuinely unsure whether the finding is valid, or the fix is non-trivial and could change the step's scope. Mark the finding `[SURFACE: <one-line description of why the user should decide>]`.
+
+You may NOT mark a finding `[IGNORED]`, `[N/A]`, or any equivalent. Every finding gets one of the three actions above.
+
+### 6.5.3 Re-verify after Applies
+
+If any finding was `[APPLIED]`, re-run §6 (the step's `Verification:` command). If it now fails, you broke something while applying — fix the new failure, then re-run again. Do not move to §6.5.4 until verification is green AND every finding has a resolution.
+
+### 6.5.4 Re-review after Applies
+
+If any finding was `[APPLIED]`, spawn `step-reviewer` a second time. New findings can appear after a fix lands. Repeat §6.5.2 → §6.5.3 → §6.5.4 until the agent returns either:
+
+- `ship as-is` with zero MUST-fix and zero un-resolved findings — proceed to §6.5.5.
+- A report whose only remaining MUST-fix findings are all `[REJECTED]` or `[SURFACE]`, with the user having explicitly OK'd the path — proceed to §6.5.5.
+
+**Hard cap: 3 review cycles per step.** If the review hasn't converged after 3 cycles, stop, surface the state to the user, and ask whether to scope back or override.
+
+### 6.5.5 Produce the consolidated summary
+
+Show the user a single structured message:
+
+```
+Step review — final state
+
+  Applied automatically: <count>
+    - <file:line>: <one-line description of fix>
+    - ...
+
+  Rejected with reason: <count>
+    - <file:line>: <one-sentence reason>
+    - ...
+
+  Awaiting your decision: <count>
+    - <file:line>: <one-line description of why this needs you>
+    - ...
+
+  Verification: <command> → exit 0 (re-run after Applies)
+  Final reviewer recommendation: <ship as-is | fix MUST-items, then ship | scope back>
+```
+
+Wait for the user's response. Only when the user signals OK (any of: "ok", "proceed", "ship it", "yes update status", or explicit override) do you move to §7. If the user wants further changes, return to §5 with their direction; do not silently update Status.
+
+### 6.5.6 Fallback if `step-reviewer` is unavailable
+
+If the agent fails to spawn or returns an error, fall back to `plan-adherence` (narrower scope: phase-plan adherence only). Note this explicitly in your summary: "Ran `plan-adherence` fallback because `step-reviewer` was unavailable; big-picture rules were not checked by an agent." Do not silently skip. The review is not optional — fallback is the floor.
 
 ## 7. Update the step file's Status header
 
-Only after verification passes AND `step-reviewer` returned `ship as-is` (or the user explicitly overrode after reviewing the report) AND the user has confirmed they're happy: edit the step file itself. Change the `**Status:** not started` line at the top to `**Status:** done (YYYY-MM-DD)`. Use today's date. If a commit hash is available (the user has already committed), append it: `**Status:** done (YYYY-MM-DD, commit <short-sha>)`. This keeps each step file truthful about its own state — future sessions read the Status header to know where to pick up.
+You may update the Status header **only when ALL of the following are true**:
 
-If verification failed, `step-reviewer` returned `fix MUST-items` or `scope back`, or the user wants changes — leave `Status:` as-is.
+1. §6 verification command exited 0 (the most recent run, after any §6.5.3 re-verification).
+2. §6.5 completed: every reviewer finding has an `[APPLIED]`, `[REJECTED: reason]`, or `[SURFACE]` resolution. No `[IGNORED]`, no skipped findings.
+3. The reviewer's final cycle returned `ship as-is`, OR the user explicitly OK'd a final state that still has `[REJECTED]` or `[SURFACE]` items in it.
+4. The user has signalled approval ("ok", "proceed", "ship it", "yes update status", or equivalent) AFTER seeing the §6.5.5 consolidated summary.
+
+Then edit the step file. Change `**Status:** not started` to `**Status:** done (YYYY-MM-DD)`. Use today's date. If a commit hash is available (the user has already committed), append it: `**Status:** done (YYYY-MM-DD, commit <short-sha>)`.
+
+If ANY of the four conditions is unmet, leave `Status:` as-is. Tell the user which condition is unmet.
 
 ## 8. Stop. Do not commit.
 
@@ -197,4 +251,8 @@ Show `git status` and `git diff --stat`. The user commits, not you. The diff is 
 - Add a dependency the step file didn't ask for.
 - Expand into a later step's scope.
 - Loosen a test or assertion to make verification pass.
+- **Skip §6.5 (the `step-reviewer` review).** The review is the gate, not a suggestion. If the agent fails to spawn, run the `plan-adherence` fallback and mark it explicitly.
+- **Silently dismiss a reviewer finding.** Every finding gets `[APPLIED]`, `[REJECTED: reason]`, or `[SURFACE]`. No `[IGNORED]`, no implicit "I didn't think it applied."
+- **Reject a finding without naming what is specifically wrong in one sentence.** "Disagree" is not a reason; "the finding cites a file the diff didn't touch" is.
+- **Update the Status header before §6.5.5's consolidated summary has been shown to the user AND explicit user OK has been received.**
 - Commit.
