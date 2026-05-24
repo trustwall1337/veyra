@@ -1,0 +1,30 @@
+# Veyra rule — cc-11-7 (FINAL_PRODUCT_PLAN §11 row 7).
+#
+# Heuristic: a service-role environment variable referenced via a
+# client-bundled env mechanism (Vite's `import.meta.env.VITE_*`, CRA's
+# `process.env.REACT_APP_*`, Next's `process.env.NEXT_PUBLIC_*`). The
+# service-role key bypasses RLS and must never reach the browser.
+#
+# This is one of the two cc-11 rows that FPP §11 classifies as
+# `confirmed_issue` when matched — but per step 07 Guardrails, the
+# adapter still leaves classification to the consuming agent.
+rules:
+  - id: service-role-on-client
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      control_id: cc-11-7
+      veyra_phase: 1
+    message: |
+      cc-11-7 — Service-role environment variable referenced in
+      client-bundled code (Vite VITE_*, CRA REACT_APP_*, Next NEXT_PUBLIC_*).
+      The service-role key bypasses RLS and must never reach the browser.
+      Move to a server-only context (edge function, server route) and ship
+      the anon key to the browser.
+    pattern-either:
+      - pattern: import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
+      - pattern: import.meta.env.VITE_SUPABASE_SERVICE_KEY
+      - pattern: process.env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY
+      - pattern: process.env.REACT_APP_SUPABASE_SERVICE_KEY
+      - pattern: process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
+      - pattern: process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY

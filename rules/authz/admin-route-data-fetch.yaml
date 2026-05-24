@@ -1,0 +1,30 @@
+# Veyra rule — cc-11-2 (FINAL_PRODUCT_PLAN §11 row 2).
+#
+# Heuristic: a React component whose function name begins with "Admin" that
+# reaches a Supabase data-fetch call without an obvious role check is likely
+# missing a server-side role gate. Frontend-only protection (a redirect, a
+# `useUser()` check) is not a substitute for a server-checked role.
+#
+# Severity maps to evidence_strength only. Classification is owned by the
+# consuming agent.
+rules:
+  - id: admin-route-data-fetch
+    languages: [typescript]
+    severity: WARNING
+    metadata:
+      control_id: cc-11-2
+      veyra_phase: 1
+    message: |
+      cc-11-2 — Admin-named function reaches a Supabase data fetch.
+      Verify a server-side role check (admin RPC, RLS policy, or server-only
+      route) actually gates this query. Frontend redirects are not a
+      substitute.
+    patterns:
+      - pattern-inside: |
+          export function $NAME(...) {
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: ^Admin
+      - pattern: $CLIENT.from($T).select(...)

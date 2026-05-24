@@ -1,0 +1,21 @@
+# Veyra rule — cc-11-7 (variant). FINAL_PRODUCT_PLAN §11 row 7.
+#
+# Heuristic: `supabase.auth.admin.*` methods require the service-role key.
+# Calling them from client-bundled code either implies a service-role key
+# reached the browser (cc-11-7 primary) or the call will fail at runtime
+# with a privilege error. Either way it's a launch-readiness signal.
+#
+# Severity maps to evidence_strength only.
+rules:
+  - id: admin-api-on-client
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      control_id: cc-11-7
+      veyra_phase: 1
+    message: |
+      cc-11-7 — supabase.auth.admin.* requires the service-role key.
+      Calling these methods from client-bundled code either implies a
+      service-role key reached the browser, or the call will fail at
+      runtime. Move admin operations to a trusted server context.
+    pattern: $CLIENT.auth.admin.$METHOD(...)

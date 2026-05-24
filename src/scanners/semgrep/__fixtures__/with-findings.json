@@ -1,0 +1,35 @@
+{
+  "version": "1.45.0",
+  "results": [
+    {
+      "check_id": "direct-object-access-by-id",
+      "path": "examples/vulnerable-lovable-supabase/src/pages/OrderPage.tsx",
+      "start": { "line": 12, "col": 5, "offset": 240 },
+      "end": { "line": 18, "col": 6, "offset": 360 },
+      "extra": {
+        "message": "cc-11-3 — Supabase query selects by id only with no user/tenant filter.",
+        "severity": "WARNING",
+        "metadata": { "control_id": "cc-11-3" }
+      }
+    },
+    {
+      "check_id": "service-role-on-client",
+      "path": "examples/vulnerable-lovable-supabase/src/lib/supabase-client.ts",
+      "start": { "line": 13, "col": 1, "offset": 480 },
+      "end": { "line": 14, "col": 1, "offset": 530 },
+      "extra": {
+        "message": "cc-11-7 — Service-role environment variable referenced in client-bundled code.",
+        "severity": "ERROR",
+        "metadata": { "control_id": "cc-11-7" }
+      }
+    }
+  ],
+  "errors": [],
+  "paths": {
+    "scanned": [
+      "examples/vulnerable-lovable-supabase/src/pages/OrderPage.tsx",
+      "examples/vulnerable-lovable-supabase/src/lib/supabase-client.ts"
+    ],
+    "skipped": []
+  }
+}

@@ -1,0 +1,30 @@
+# Veyra rule — cc-11-4 (FINAL_PRODUCT_PLAN §11 row 4).
+#
+# Heuristic: reading `tenant_id` / `org_id` / `workspace_id` from URL params,
+# query strings, or request bodies and passing it to a Supabase filter means
+# the server is trusting the client to declare its own tenant scope. The
+# correct pattern is to derive tenant scope from the authenticated identity
+# server-side.
+#
+# Severity maps to evidence_strength only. Classification is owned by the
+# consuming agent.
+rules:
+  - id: client-provided-tenant-id
+    languages: [typescript]
+    severity: WARNING
+    metadata:
+      control_id: cc-11-4
+      veyra_phase: 1
+    message: |
+      cc-11-4 — Tenant identifier is read from a client-controlled source
+      (URL params / search params / request body) and used as a Supabase
+      filter. Server must derive tenant scope from the authenticated
+      identity instead.
+    # Direct `.tenant_id` / `.org_id` property access intentionally NOT in the
+    # rule — it over-matches on chains like `session.user.app_metadata.tenant_id`
+    # which read tenant scope from the AUTHENTICATED identity (a safe pattern).
+    # URLSearchParams `.get("tenant_id")` is the heuristic signal we want.
+    pattern-either:
+      - pattern: $PARAMS.get("tenant_id")
+      - pattern: $PARAMS.get("org_id")
+      - pattern: $PARAMS.get("workspace_id")

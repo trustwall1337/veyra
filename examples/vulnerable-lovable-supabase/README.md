@@ -24,7 +24,7 @@ Numbers reference `FINAL_PRODUCT_PLAN.md §11` (the canonical 12 checks).
 
 | `control_id` | Where it lives | Notes |
 |---|---|---|
-| `cc-11-1` | `src/App.tsx`, `src/pages/ProtectedPage.tsx` | Frontend-only redirect, no server check |
+| `cc-11-1` | `src/App.tsx` (the `RequireUser` wrapper) | Frontend-only redirect, no server check |
 | `cc-11-2` | `src/pages/AdminPage.tsx` | Admin route without server-side role check |
 | `cc-11-3` | `src/pages/OrderPage.tsx` | Direct object access by id, no tenant filter |
 | `cc-11-4` | `src/pages/DashboardPage.tsx` | Query uses client-provided `tenant_id` |
@@ -47,6 +47,11 @@ Numbers reference `FINAL_PRODUCT_PLAN.md §11` (the canonical 12 checks).
 
 `package.json` pins `axios@0.21.0` to seed `cc-11-10`. **Do not "fix" this** —
 upgrading the pin removes the OSV finding the fixture is supposed to surface.
+
+No lockfile (`package-lock.json` / `pnpm-lock.yaml`) is committed. OSV-Scanner
+accepts `package.json` directly for the npm ecosystem, so the OSV adapter is
+pointed at `package.json` as the `--lockfile` argument. Running `pnpm install`
+inside the fixture would generate a lockfile; tests never need it.
 
 ## Hardcoded "secret"
 

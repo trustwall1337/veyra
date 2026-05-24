@@ -1,6 +1,6 @@
 # Step 07 — Semgrep adapter + custom rules
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §7 Task 9`, §1 Semgrep verified, §3 Step 3 deterministic checks
 **Produces:** `src/scanners/semgrep/` + `rules/{authz,supabase,secrets}/*.yaml`
 **Depends on:** 02, 04
@@ -25,7 +25,7 @@ Wrap Semgrep behind an adapter and ship the first batch of custom rules. Phase 1
   - Client-side use of Supabase service-role key
   - Supabase client created with anon key but used for privileged operation
 - `rules/secrets/` — supplementary rules for non-credential secrets Gitleaks doesn't catch (e.g. hardcoded webhook URLs).
-- Each rule has positive (`should-match`) and negative (`should-not-match`) fixtures under `rules/<category>/tests/`.
+- Each rule has positive (`// ruleid:`) and negative (`// ok:`) cases in a single fixture co-located with the rule yaml (same directory, same basename, language-specific extension). This is `semgrep --test`'s built-in pairing convention; a separate `tests/` subdirectory would not be auto-discovered by `--test`.
 
 ## Done when
 

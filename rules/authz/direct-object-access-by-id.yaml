@@ -1,0 +1,23 @@
+# Veyra rule — cc-11-3 (FINAL_PRODUCT_PLAN §11 row 3).
+#
+# Heuristic: a Supabase query that selects a single record filtered ONLY by
+# `id` (no follow-up `.eq("user_id", ...)` or `.eq("tenant_id", ...)`) likely
+# allows any signed-in user to read any record id they can guess.
+#
+# Severity maps to evidence_strength only. Classification (`likely_issue` vs
+# `confirmed_issue`) is owned by the consuming agent — per step 07 Guardrails.
+rules:
+  - id: direct-object-access-by-id
+    languages: [typescript]
+    severity: WARNING
+    metadata:
+      control_id: cc-11-3
+      veyra_phase: 1
+    message: |
+      cc-11-3 — Supabase query reaches a single record by id alone, with no
+      .eq("user_id", ...) or .eq("tenant_id", ...) constraint. A signed-in
+      user with a guessable id could read any row.
+    patterns:
+      - pattern-either:
+          - pattern: $CLIENT.from($T).select(...).eq("id", $ID).single()
+          - pattern: $CLIENT.from($T).select(...).eq("id", $ID).maybeSingle()

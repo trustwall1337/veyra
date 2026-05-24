@@ -1,0 +1,9 @@
+{
+  "version": "1.45.0",
+  "results": [],
+  "errors": [],
+  "paths": {
+    "scanned": ["src/lib/safe.ts"],
+    "skipped": []
+  }
+}
