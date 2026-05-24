@@ -1,6 +1,6 @@
 # Step 03 — CLI argv parsing and dual-mode scan entry
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §7 Task 3`, §2 operating modes A and B, §6 `--fail-on-blocker`
 **Produces:** `src/cli/index.ts` (replaces stub) + `src/cli/scan-command.ts`
 **Depends on:** 02
