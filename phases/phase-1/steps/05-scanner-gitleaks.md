@@ -1,6 +1,6 @@
 # Step 05 — Gitleaks scanner adapter
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §7 Task 9`, §4.6 (Tool-runner controls), `CLAUDE.md §Secrets`
 **Produces:** `src/scanners/gitleaks/`
 **Depends on:** 02

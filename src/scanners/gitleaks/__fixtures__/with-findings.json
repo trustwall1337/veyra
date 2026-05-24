@@ -1,0 +1,42 @@
+[
+  {
+    "Description": "Generic API Key",
+    "StartLine": 12,
+    "EndLine": 12,
+    "StartColumn": 24,
+    "EndColumn": 56,
+    "Match": "REDACTED",
+    "Secret": "REDACTED",
+    "File": "src/lib/secrets.ts",
+    "SymlinkFile": "",
+    "Commit": "",
+    "Entropy": 4.5,
+    "Author": "",
+    "Email": "",
+    "Date": "",
+    "Message": "",
+    "Tags": [],
+    "RuleID": "generic-api-key",
+    "Fingerprint": "src/lib/secrets.ts:generic-api-key:12"
+  },
+  {
+    "Description": "AWS Access Key",
+    "StartLine": 3,
+    "EndLine": 3,
+    "StartColumn": 1,
+    "EndColumn": 24,
+    "Match": "REDACTED",
+    "Secret": "REDACTED",
+    "File": ".env.example",
+    "SymlinkFile": "",
+    "Commit": "",
+    "Entropy": 4.0,
+    "Author": "",
+    "Email": "",
+    "Date": "",
+    "Message": "",
+    "Tags": [],
+    "RuleID": "aws-access-token",
+    "Fingerprint": ".env.example:aws-access-token:3"
+  }
+]
