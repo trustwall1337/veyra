@@ -1,0 +1,113 @@
+{
+  "$schema_note": "Veyra Phase 1 fixture expectations. Keyed by control_id from FINAL_PRODUCT_PLAN §11. Owned alongside src/agents/evidence-report/controls.ts — renaming a control_id requires updating both in the same commit. See README.md for the seeded-issue table.",
+  "fixture_path": "examples/vulnerable-lovable-supabase",
+  "controls_catalog_ref": "src/agents/evidence-report/controls.ts",
+  "must_surface": [
+    {
+      "control_id": "cc-11-1",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "src/App.tsx",
+      "description": "Frontend-only redirect-on-load; no server-side check."
+    },
+    {
+      "control_id": "cc-11-2",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "src/pages/AdminPage.tsx",
+      "description": "Admin route loads admin data without a server-side role check."
+    },
+    {
+      "control_id": "cc-11-3",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "src/pages/OrderPage.tsx",
+      "description": "Direct object access by id from URL; no user/tenant filter."
+    },
+    {
+      "control_id": "cc-11-4",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "src/pages/DashboardPage.tsx",
+      "description": "Query filters by client-provided tenant_id from URL params."
+    },
+    {
+      "control_id": "cc-11-5",
+      "finding_type": "likely_issue",
+      "evidence_strength": "high",
+      "mcp_dependent": false,
+      "fixture_anchor": "supabase/schema.sql — public.users",
+      "description": "Sensitive table 'users' has RLS disabled."
+    },
+    {
+      "control_id": "cc-11-6",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "supabase/schema.sql — public.orders",
+      "description": "CREATE POLICY ... USING (true) on a sensitive table."
+    },
+    {
+      "control_id": "cc-11-7",
+      "finding_type": "confirmed_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "src/lib/supabase-client.ts",
+      "description": "Service-role key bundled into the client (Vite VITE_ env var)."
+    },
+    {
+      "control_id": "cc-11-8",
+      "finding_type": "confirmed_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "src/lib/secrets.ts",
+      "description": "Hardcoded JWT-shaped fake key (Gitleaks-detectable). Veyra must --redact the value before persisting."
+    },
+    {
+      "control_id": "cc-11-9",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "supabase/schema.sql — public.documents",
+      "description": "Policy grants all rows to 'authenticated' with no per-row predicate."
+    },
+    {
+      "control_id": "cc-11-10",
+      "finding_type": "likely_issue",
+      "mcp_dependent": false,
+      "fixture_anchor": "package.json — axios 0.21.0",
+      "description": "Vulnerable dependency pinned (CVE-2021-3749 SSRF in axios 0.21.0)."
+    },
+    {
+      "control_id": "cc-11-11",
+      "finding_type": "missing_evidence",
+      "mcp_dependent": false,
+      "fixture_anchor": "absence of src/**/*.test.{ts,tsx}",
+      "description": "No negative tests for protected routes."
+    },
+    {
+      "control_id": "cc-11-12",
+      "finding_type": "likely_issue",
+      "mcp_dependent": true,
+      "fixture_anchor": "mcp-fixtures/supabase-storage-buckets.json — user-uploads bucket",
+      "description": "Public storage bucket with SELECT granted to anon."
+    }
+  ],
+  "must_be_coverage_gap": [
+    {
+      "control_id": "cc-11-12",
+      "when": "--supabase-mcp is not configured",
+      "rationale": "Bucket state is not in db dump; without MCP this finding is a coverage gap, not silent absence."
+    }
+  ],
+  "must_not_surface": [
+    {
+      "anchor": "supabase/schema.sql — public.timezones",
+      "rationale": "Non-sensitive lookup table; permissive read by design."
+    },
+    {
+      "anchor": "supabase/schema.sql — public.feature_flags",
+      "rationale": "Non-sensitive lookup table; permissive read by design."
+    },
+    {
+      "anchor": "mcp-fixtures/supabase-storage-buckets.json — internal-reports bucket",
+      "rationale": "Private bucket; service_role only."
+    }
+  ]
+}

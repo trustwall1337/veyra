@@ -1,6 +1,6 @@
 # Step 04 — Vulnerable Lovable+Supabase fixture project
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §6 Required` (vulnerable fixture) + §8 success criteria; `FINAL_PRODUCT_PLAN §11` (12 initial checks); step 14 `controls.ts` (canonical catalog)
 **Produces:** `examples/vulnerable-lovable-supabase/` populated with broken-by-design app + `expected-findings.json` + `mcp-fixtures/`
 **Depends on:** 02

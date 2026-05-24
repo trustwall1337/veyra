@@ -1,0 +1,45 @@
+{
+  "_comment_header": "REPLAY FIXTURE for Veyra tests. NOT an export from a real Supabase project. Shape mimics Supabase MCP list_storage_buckets + get_storage_config; the supabase-rls agent (step 09) consumes this when --supabase-mcp is configured. Without MCP, cc-11-12 must be reported as coverage_gap, not silent absence.",
+  "buckets": [
+    {
+      "id": "user-uploads",
+      "name": "user-uploads",
+      "public": true,
+      "file_size_limit": null,
+      "allowed_mime_types": null,
+      "created_at": "2026-01-15T09:00:00.000Z",
+      "policies": [
+        {
+          "name": "anon_can_select_uploads",
+          "operation": "SELECT",
+          "role": "anon",
+          "definition": "bucket_id = 'user-uploads'"
+        },
+        {
+          "name": "authenticated_can_insert_uploads",
+          "operation": "INSERT",
+          "role": "authenticated",
+          "definition": "bucket_id = 'user-uploads'"
+        }
+      ],
+      "_fixture_note": "cc-11-12 — planted issue: public bucket with anon SELECT."
+    },
+    {
+      "id": "internal-reports",
+      "name": "internal-reports",
+      "public": false,
+      "file_size_limit": 52428800,
+      "allowed_mime_types": ["application/pdf"],
+      "created_at": "2026-01-15T09:00:00.000Z",
+      "policies": [
+        {
+          "name": "service_role_only",
+          "operation": "ALL",
+          "role": "service_role",
+          "definition": "bucket_id = 'internal-reports'"
+        }
+      ],
+      "_fixture_note": "Clean control — private bucket scoped to service_role. Should NOT surface a finding."
+    }
+  ]
+}
