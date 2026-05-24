@@ -23,16 +23,18 @@ Fill the Phase 1 placeholder file `src/types/active-validation.ts` with the five
 - `ActiveValidationResult = { test_id, control_id, outcome: 'proven_denial' | 'proven_allowed' | 'inconclusive', evidence_refs[], duration_ms, synthetic_data_refs[], assertion_details }`
 - `TestPlanEntry = { test_id, control_id, owning_agent_id, required_synthetic_resources, expected_outcome_hint, max_duration_ms }`
 
-### `src/core/policy/executors/types.ts` (new)
+### `ActionExecutor` interface
 
-- `ActionExecutor` interface:
-  - `id: ConnectorId` — registry key
-  - `supportsMode(mode: ValidationMode): boolean`
-  - `execute<A extends AllowedAction>(action, args, context): Promise<Result<ExecutionReceipt, ExecutorError>>`
+**Birthplace resolved: Phase 1 step 02** (typed stub only; no implementation in Phase 1). Phase 2 step 02 imports the interface from `src/core/policy/executors/types.ts` and adds nothing to it — the type shape is locked when Phase 1 step 02 lands. Step 01 decision 2 ratifies this.
+
+Interface shape (already in Phase 1 step 02):
+- `id: ConnectorId` — registry key
+- `supportsMode(mode: ValidationMode): boolean`
+- `execute<A extends AllowedAction>(action, args, context): Promise<Result<ExecutionReceipt, ExecutorError>>`
 - `ExecutionReceipt = { action, started_at, completed_at, args_fingerprint_sha256, outcome: 'ok' | 'denied' | 'failed', details? }`
 - `ExecutorError` subclass of `Error`
 
-If decision 2 in step 01 chose "Phase 1 step 02 stub," update Phase 1 step 02 to add the interface type definition (no implementation) and have Phase 2 step 02 import from it. Otherwise the interface lives in Phase 2 step 02.
+Phase 2 step 02 imports these without modification. The implementation (`SandboxExecutor`) lands in step 03.
 
 ## Done when
 

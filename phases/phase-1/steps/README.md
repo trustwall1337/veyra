@@ -19,7 +19,7 @@ Veyra is **not** designed as a binary `read_only=true/false` tool. From step 02 
 
 - `read_only_evidence` — Phase 1's only implemented mode. Safe for any environment including production. Reads code, schema metadata, storage metadata; never mutates.
 - `sandbox_active_validation` — Phase 2 target. User opts in. Synthetic identities, synthetic data, controlled negative tests, mandatory cleanup. Only against `local | dev | preview | staging | sandbox` environments.
-- `approved_production_safe` — Phase 3 target. Strict scope, explicit approval, rate-limited, no exploitation.
+- `approved_production_safe` — later phase. Strict scope, explicit approval, rate-limited, no exploitation. Product-rollout placement: `FPP §17 Phase 5` ("safe live-product validation"). The two numbering systems are reconciled by mode name, not by phase number.
 
 **Capability decisions consult `policy.allowed_actions.has('<action>')`, never `policy.mode === '...'`.** The mode is metadata for the report. The capability set is the authority. This means accidentally toggling `read_only=false` somewhere does NOT enable mutation — there is no such toggle.
 

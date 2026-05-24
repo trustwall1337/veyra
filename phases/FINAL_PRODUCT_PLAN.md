@@ -785,24 +785,26 @@ recommendation:
 
 The MVP should start with fewer checks and higher confidence.
 
-The broader plan can eventually cover 20-30 checks, but the first hosted MVP should not treat all checks as launch blockers. Early trust depends on being precise, evidence-backed, and clear about uncertainty.
+The broader plan can eventually cover 20-30 checks, but the first local-first MVP should not treat all checks as launch blockers. Early trust depends on being precise, evidence-backed, and clear about uncertainty.
 
-### Initial 12 checks
+### Initial 12 checks (canonical numbering — `cc-11-N` is the `control_id` shape)
 
-| # | Check | Type |
-|---|---|---|
-| 1 | Supabase service-role key exposed in repository | confirmed_issue |
-| 2 | `.env` or secret file committed | confirmed_issue |
-| 3 | RLS disabled on sensitive table | confirmed_issue |
-| 4 | RLS enabled but no policies | confirmed_issue |
-| 5 | Broad RLS policy such as `using (true)` | likely_issue |
-| 6 | All-authenticated users can access sensitive table | likely_issue |
-| 7 | Public sensitive storage bucket | confirmed_issue |
-| 8 | Client-side use of privileged keys | confirmed_issue |
-| 9 | Direct object access without tenant/user constraint | likely_issue |
-| 10 | Admin route without clear server-side role check | likely_issue |
-| 11 | Frontend-only route protection | likely_issue |
-| 12 | Missing negative auth/RLS tests | missing_evidence |
+This table is the source of truth for `control_id` numbering. Every reference in the step files (Phase 1 fixture, Phase 2 negative-test catalog, expected-outcomes manifest, `controls.ts`) uses `cc-11-N` where N is the row number below. Renumbering this table requires renaming every dependent file in the same commit.
+
+| # | `control_id` | Check | Type |
+|---|---|---|---|
+| 1 | `cc-11-1` | Frontend-only protected route (redirect-on-load with no server check) | likely_issue |
+| 2 | `cc-11-2` | Admin route without clear server-side role check | likely_issue |
+| 3 | `cc-11-3` | Direct object access by ID without user/tenant filter | likely_issue |
+| 4 | `cc-11-4` | Query uses client-provided `tenant_id` / `org_id` / `workspace_id` | likely_issue |
+| 5 | `cc-11-5` | Sensitive table with RLS disabled (`evidence_strength: high` on canonical-name match) | likely_issue |
+| 6 | `cc-11-6` | Sensitive table with `CREATE POLICY ... USING (true)` | likely_issue |
+| 7 | `cc-11-7` | Client-side use of privileged Supabase key (service-role vs anon mismatch) | confirmed_issue |
+| 8 | `cc-11-8` | Hardcoded API key / Supabase service-role key in source (Gitleaks-detectable) | confirmed_issue |
+| 9 | `cc-11-9` | Table with policy granting all rows to `authenticated` without per-row check | likely_issue |
+| 10 | `cc-11-10` | Vulnerable dependency in `package.json` (OSV-detectable) | likely_issue |
+| 11 | `cc-11-11` | Missing negative tests for protected routes | missing_evidence |
+| 12 | `cc-11-12` | Public storage bucket with `select` granted to `anon` (MCP-only detection) | likely_issue |
 
 ### Later warning checks
 
@@ -1002,7 +1004,7 @@ without rewriting types or reporters:
 | 4 | Add Gitleaks and OSV/npm audit adapters | Redacted secrets findings and dependency findings |
 | 5 | Add Semgrep custom-rule adapter for route/auth patterns | Initial route/authz findings |
 | 6 | Add optional Lovable MCP and Supabase MCP read-only context collectors | Declared context and metadata artifacts |
-| 7 | Add suggested tests, optional AI explanation adapter, and `--fail-on-blocker` | Useful CLI output and CI-ready exit code |
+| 7 | Add suggested tests, AI provider adapter interface (no provider wired — AI capability lands in Phase 2), and `--fail-on-blocker` | Useful CLI output and CI-ready exit code |
 | 8 | Test against fixture plus 5 real or representative projects and manually verify findings | Case studies, false-positive review, improved checks |
 
 The first validation cycle should manually verify every finding. The goal is not volume of findings; it is whether real users trust the report and act on it.

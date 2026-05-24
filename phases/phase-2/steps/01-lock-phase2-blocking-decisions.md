@@ -14,7 +14,7 @@ Resolve every open engineering choice that downstream Phase 2 steps depend on, s
 ## Decisions to ratify (planner picks; user confirms)
 
 1. **AI provider order: Anthropic first.** Default model `claude-sonnet-4-6`. Land in step 04. OpenAI fallback in step 05. Runner-up: ship both adapters in step 04. Tradeoff: dependency isolation + the default ships first.
-2. **`ActionExecutor` interface birthplace: Phase 1 step 02 (typed stub).** Phase 1 step 02 currently doesn't list it; minor edit adds the type definition there. Phase 2 step 02 then imports it. Runner-up: introduce it new in Phase 2 step 02. Tradeoff: keeps Phase 1 the canonical source of `src/core/policy/executors/types.ts`.
+2. **`ActionExecutor` interface birthplace: Phase 1 step 02 (typed stub).** Phase 1 step 02 now lists it (as of the 2026-05-24 alignment pass) — `src/core/policy/executors/types.ts` is owned by Phase 1. Phase 2 step 02 imports it without modification. Runner-up: introduce it new in Phase 2 step 02. Decision settled; documented here so any future revisit has the trail.
 3. **Prompt-cache TTL: 5-minute default; `--ai-cache-ttl` to opt up to 1-hour.** Per Anthropic 2026 pricing, 1-hour cache is priced separately. Default to the cheap option; let the user opt up. Runner-up: 1-hour default. Tradeoff: cost vs cache hit rate; defaulting cheap is the safer floor.
 
 ## Decisions user must make (no recommendation strong enough to lock)

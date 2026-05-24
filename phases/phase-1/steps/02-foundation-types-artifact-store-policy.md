@@ -1,6 +1,6 @@
 # Step 02 — Foundation types, artifact store, policy guard, orchestrator skeleton
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §7 Task 2`, §4.0 architecture, §5 finding model
 **Produces:** types in `src/types/`, infra in `src/core/{artifacts,orchestrator,policy}/`
 **Depends on:** 01
@@ -57,6 +57,7 @@ Nothing in `src/agents/`, `src/connectors/`, or `src/scanners/` can compile unti
 - `src/core/artifacts/artifact-store.ts` — append-only artifact store keyed by scan id; reads/writes via typed `ArtifactRef`.
 - `src/core/orchestrator/scan-orchestrator.ts` — skeleton only (agent registration, topo-sort placeholder, per-agent try-boundary). Full wiring lands in step 18.
 - `src/core/policy/tool-policy.ts` — `enforce(toolCall, policy)` returning `Result<void, PolicyViolationError>`. **Decisions go through `policy.allowed_actions.has('<action>')`**, never `policy.mode === '...'`. Takes service identity as parameter — no hard-coded `lovable | supabase` switch.
+- `src/core/policy/executors/types.ts` — `ActionExecutor` interface (typed stub only; no implementation in Phase 1). Defines `id: ConnectorId`, `supportsMode(mode: ValidationMode): boolean`, and `execute<A extends AllowedAction>(action, args, context): Promise<Result<ExecutionReceipt, ExecutorError>>` + `ExecutionReceipt` + `ExecutorError`. The seam lives here so Phase 2's `SandboxExecutor` slots in without a refactor. Phase 1 ships the interface; no executor is registered or compiled into the scan path.
 
 ## Done when
 

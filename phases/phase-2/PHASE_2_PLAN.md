@@ -28,40 +28,55 @@ The bar that says "Phase 2 is done" is in §8.
 
 ## §1 Verified Capabilities (for Phase 2)
 
-This section enumerates exactly what Phase 2 is permitted to use, what it must not use even when available, and the citations for each. The discipline mirrors Phase 1 §1.
+This section enumerates exactly what Phase 2 is permitted to use, what it must not use even when available, and the source URLs for each. The discipline mirrors Phase 1 §1. Sources verified 2026-05-24; treat as point-in-time references.
 
 ### 1.1 Supabase Management & Auth Admin API
 
 - **Permitted**:
   - `auth.admin.createUser({ email, password, user_metadata: { veyra_scan_id, veyra_synthetic: true } })` — creates a synthetic identity tagged with the scan id.
-  - `auth.admin.deleteUser(uid)` — cleanup path.
+  - `auth.admin.deleteUser(uid, { shouldSoftDelete: false })` — hard-delete cleanup path.
+  - `auth.admin.getUser(uid)` — per-uuid cleanup verification (registry-driven, never `listUsers`).
   - INSERT / DELETE on user-application tables, **but only on rows tagged with `veyra_scan_id` metadata** (preferred: a dedicated `veyra_synthetic_data` column, or a separate Veyra-only schema).
   - Storage object upload + delete, **only into Veyra-created paths under a sandbox-scoped prefix**.
 - **Forbidden**:
   - Any mutation of pre-existing rows. Veyra-created rows only.
+  - `auth.admin.listUsers` in the scan path. It would enumerate the user table; the synthetic-data registry replaces it.
   - Any operation against a project that is not declared as a sandbox.
   - Storing the service-role key in artifacts, logs, or AI prompts.
   - Calling Supabase MCP tools that Phase 1 forbids (`execute_sql`, `apply_migration`, etc.). The Admin API path is separate from the MCP path and has stricter rules.
+- **Sources**:
+  - Auth Admin SDK reference: https://supabase.com/docs/reference/javascript/auth-admin-deleteuser
+  - Supabase Management API: https://supabase.com/docs/reference/api/introduction
+  - Auth rate limits: https://supabase.com/docs/guides/auth/rate-limits
 
 ### 1.2 Lovable Preview Environments
 
 - **Permitted**: read declared context from the same six-tool MCP allowlist Phase 1 uses (`get_project`, `list_files`, `read_file`, `list_edits`, `get_diff`, `send_message` with fixed templates).
 - **Forbidden**: any Lovable mutation tool, deployment trigger, or remix. Phase 2 does not change the Lovable allowlist.
+- **Source**: https://docs.lovable.dev/integrations/lovable-mcp-server (same as Phase 1 §1).
 
 ### 1.3 Anthropic Claude API
 
-- **Permitted**: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5` for explanation generation, suggested-test refinement, and control-card narrative. Prompt caching required on the system prompt and the canonical control catalog.
+- **Permitted**: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5` for explanation generation, suggested-test refinement, and control-card narrative. Prompt caching required on the system prompt and the canonical control catalog. Structured outputs via `output_config.format`.
 - **Forbidden**: tool-use loops that mutate Veyra-managed state. Computer-use and agentic-loop modes are out of scope.
+- **Sources**:
+  - Prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  - Structured outputs: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+  - Model overview: https://www.anthropic.com/claude/sonnet
 
 ### 1.4 OpenAI API (fallback)
 
-- **Permitted**: a single chat-completion adapter as a fallback when Anthropic is unavailable. Same sanitization rules.
+- **Permitted**: a single chat-completion adapter as a fallback when Anthropic is unavailable. `response_format: { type: 'json_schema', strict: true }` for grammar-enforced JSON. Same sanitization rules.
 - **Forbidden**: any "automatic browsing" or "code interpreter" tool. Plain chat-completions with structured output only.
+- **Sources**:
+  - Structured outputs guide: https://developers.openai.com/api/docs/guides/structured-outputs
+  - Structured outputs announcement: https://openai.com/index/introducing-structured-outputs-in-the-api/
 
 ### 1.5 Existing Phase 1 surface (unchanged)
 
 - Gitleaks (`--redact` mandatory), OSV-Scanner, Semgrep custom rules.
 - Phase 1 deterministic agents continue to run on every scan, regardless of mode.
+- Sources are listed in `PHASE_1_PLAN.md §1`; unchanged for Phase 2.
 
 ---
 
@@ -199,8 +214,10 @@ The discriminated union declared in `phase-1/steps/02-foundation-types-artifact-
 
 ### 5.2 Readiness status
 
-- `proven_in_sandbox` (reserved in Phase 1) is now emitted by `evidence-report` when: at least one `proven_denial` exists for the control AND `cleanup-proof.json` shows `residual_count: 0`.
-- `launch_blocker` is now emitted on: any `confirmed_issue + fix_before_launch` (Phase 1), OR any high-confidence `likely_issue + fix_before_launch` (Phase 1), OR any `proven_allowed` outcome on a sensitive endpoint (NEW Phase 2 path).
+**Active evidence takes precedence over heuristic strength.** When a control has a `proven_denial` outcome (with verified cleanup) or a `proven_allowed` outcome, the readiness status is computed from active evidence first; heuristic-based blocker rules apply only when active evidence is absent. Step 10e implements the exact rule order; the summary:
+
+- `proven_in_sandbox` is emitted when: at least one `proven_denial` exists for the control AND `cleanup-proof.json` shows `residual_count: 0` AND no contradicting `proven_allowed`. This wins over a heuristic `likely_issue + evidence_strength: high + fix_before_launch` that would otherwise produce `launch_blocker` — direct evidence (the control DID deny the synthetic actor) overrides indirect inference.
+- `launch_blocker` is emitted on: any `proven_allowed` outcome (NEW Phase 2 — direct evidence path), OR any `confirmed_issue + fix_before_launch` (Phase 1, unchanged), OR any high-confidence `likely_issue + fix_before_launch` when no contradicting active outcome exists (Phase 1, refined).
 
 ### 5.3 New finding-classification rule (Phase 2 only)
 

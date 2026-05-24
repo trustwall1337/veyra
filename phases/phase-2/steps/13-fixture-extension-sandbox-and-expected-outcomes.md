@@ -5,7 +5,7 @@
 **Produces:** fixture (`examples/vulnerable-lovable-supabase/sandbox-fixture/`)
 **Depends on:** 10e
 **Executed by:** plain coding pass
-**Verification:** `expected-outcomes.json` keyed by `control_id` matches `controls.ts` (consistency test); fixture README documents whether live or recorded (per step 01 decision 4)
+**Verification:** every `(control_id, variant_id)` entry in `expected-outcomes.json` references a `control_id` in `controls.ts` (consistency test); fixture README documents whether live or recorded (per step 01 decision 4)
 
 ## Goal
 
@@ -16,14 +16,24 @@ Extend the Phase 1 vulnerable fixture so Mode B can run end-to-end against it. F
 ### Common (both options)
 
 - `examples/vulnerable-lovable-supabase/sandbox-fixture/` directory.
-- `examples/vulnerable-lovable-supabase/sandbox-fixture/expected-outcomes.json` keyed by `control_id`:
-  - `cc-11-2` → `proven_allowed` (admin route without server check)
-  - `cc-11-3` → `proven_allowed` (direct object access)
-  - `cc-11-4` → `proven_allowed` (client tenant_id override)
-  - `cc-11-5` → `proven_denial` on RLS-on variant; `proven_allowed` on RLS-off variant (two fixtures or a parameterized one)
-  - `cc-11-6` → `proven_allowed` (broad `USING (true)`)
-  - `cc-11-12` → `proven_allowed` (public bucket)
-  - Seeded clean controls → `proven_denial` or no `TestPlanEntry` emitted
+- `examples/vulnerable-lovable-supabase/sandbox-fixture/expected-outcomes.json` — array of `{ control_id, variant_id, expected_outcome }` entries so a single `control_id` can declare multiple expected outcomes across fixture variants:
+
+```jsonc
+[
+  { "control_id": "cc-11-1", "variant_id": "frontend-only", "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-2", "variant_id": "no-server-check", "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-3", "variant_id": "no-tenant-filter", "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-4", "variant_id": "client-provided", "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-5", "variant_id": "rls-off",  "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-5", "variant_id": "rls-on",   "expected_outcome": "proven_denial"  },
+  { "control_id": "cc-11-6", "variant_id": "using-true", "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-9", "variant_id": "all-auth", "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-12","variant_id": "public-bucket","expected_outcome": "proven_allowed" }
+]
+```
+
+- `variant_id` is required even when a control has only one variant. This keeps the array shape uniform and lets step 15 assert outcomes per `(control_id, variant_id)` tuple.
+- Seeded clean controls produce `proven_denial` against an explicit clean variant entry, OR no entry at all if no `TestPlanEntry` is emitted for them.
 
 ### Live-fixture option (step 01 decision 4 = live)
 
@@ -38,9 +48,10 @@ Extend the Phase 1 vulnerable fixture so Mode B can run end-to-end against it. F
 
 ## Done when
 
-- `expected-outcomes.json` exists and references only `control_id`s from `controls.ts` (consistency test fails the build on drift).
+- `expected-outcomes.json` exists; every entry's `control_id` is in `controls.ts` (consistency test fails the build on drift); every `variant_id` is non-empty.
+- `cc-11-5` has at least two entries: `variant_id: 'rls-off'` → `proven_allowed` and `variant_id: 'rls-on'` → `proven_denial`. Other controls may have one variant each.
 - Fixture README documents the chosen option clearly.
-- Step 15 gate can read `expected-outcomes.json` and assert outcome-per-control against scan output.
+- Step 15 gate can read `expected-outcomes.json` and assert outcome-per-`(control_id, variant_id)` against scan output.
 
 ## Guardrails
 

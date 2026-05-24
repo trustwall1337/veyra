@@ -15,10 +15,11 @@
 > at `phases/phase-1/steps/`. Key alignments worth knowing before reading on:
 >
 > - **Validation-policy seam.** Phase 1's only implemented mode is
->   `read_only_evidence`. `sandbox_active_validation` and
->   `approved_production_safe` are deferred (see
->   `phases/phase-2/PHASE_2_PLAN.md`). The `--mode` and `--env` flags exist
->   from day one; Phase 2/3 modes reject at parse time.
+>   `read_only_evidence`. `sandbox_active_validation` lands in Phase 2
+>   (`phases/phase-2/PHASE_2_PLAN.md`); `approved_production_safe` is a
+>   later-phase capability (product-rollout placement: `FPP §17 Phase 5`).
+>   The `--mode` and `--env` flags exist from day one; deferred modes reject
+>   at parse time with explicit "not yet implemented" messages.
 > - **AI deferred.** §3 Step 4 "AI Security Reasoning" moves to Phase 2.
 >   Phase 1 ships an AI provider adapter interface only; no provider is
 >   wired. See `phases/phase-2/PHASE_2_PLAN.md §10`.
@@ -800,7 +801,7 @@ blast_radius:
 - compliance claims
 - live AI provider integration (Phase 2)
 - sandbox active validation (Phase 2; see `phases/phase-2/PHASE_2_PLAN.md`)
-- approved production-safe validation (Phase 3)
+- approved production-safe validation (later phase; product-rollout placement `FPP §17 Phase 5`)
 - synthetic identity / tenant creation (Phase 2)
 - cleanup proof machinery (Phase 2)
 - AI-generated finding classifications (forbidden in all phases)

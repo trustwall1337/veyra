@@ -19,13 +19,13 @@ Implement the first `ActionExecutor` — `SandboxExecutor`. Wire `tool-policy.ts
 - Update `src/core/policy/tool-policy.ts` to populate `allowed_actions` based on `policy.mode`:
   - `read_only_evidence`: read actions only (Phase 1 set, unchanged)
   - `sandbox_active_validation`: read actions + the six synthetic-data actions above
-  - `approved_production_safe`: still rejected; Phase 3
+  - `approved_production_safe`: still rejected; later phase (product-rollout placement `FPP §17 Phase 5`)
 - `src/core/policy/executors/sandbox/__fixtures__/` + tests.
 
 ## Done when
 
 - Executor registered by `ConnectorId` (no `if (mode === 'sandbox')` in shared code).
-- Unit tests cover: allowed action under Mode B succeeds; same action under Mode A returns `PolicyViolationError`; unknown action returns `PolicyViolationError`; Mode C action returns `PolicyViolationError` with explicit "Phase 3 — not yet implemented" reason.
+- Unit tests cover: allowed action under Mode B succeeds; same action under Mode A returns `PolicyViolationError`; unknown action returns `PolicyViolationError`; Mode C action returns `PolicyViolationError` with explicit "not yet implemented (later phase; see `FPP §17 Phase 5`)" reason.
 - `mcp-policy-check` on the diff returns zero hits (this step does not touch MCP — but a guard run is cheap and catches accidental drift).
 - Registry collision test from step 02 still passes.
 - The Supabase MCP connector (Phase 1 step 16) is NOT widened — Admin API path is structurally separate.

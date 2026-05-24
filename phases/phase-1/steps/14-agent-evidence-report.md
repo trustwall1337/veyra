@@ -17,7 +17,7 @@ Compose control cards from all upstream agent findings, compute `readiness_statu
 
 - `src/agents/evidence-report/agent.ts` — implements `VeyraAgent`. Reads every upstream agent's findings from the artifact store, joins them to control definitions, builds `ControlCard[]`.
 - `src/agents/evidence-report/controls.ts` — the canonical control catalog. Each entry has:
-  - `control_id` matching `FINAL_PRODUCT_PLAN §11` numbering (e.g. `cc.11.5`)
+  - `control_id` matching `FINAL_PRODUCT_PLAN §11` numbering. Format is `cc-11-N` (kebab, dashes — NOT dots). Example: `cc-11-5` for RLS disabled on a sensitive table.
   - `expected_behavior` — single-sentence description
   - `required_evidence_kinds` — which `EvidenceKind` sources can support this control
   - `owning_agent_ids` — which agents are expected to produce findings against this control

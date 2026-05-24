@@ -14,10 +14,10 @@ The supabase-rls agent learns to emit `TestPlanEntry[]` for the controls it owns
 ## What lands
 
 - Extend `src/agents/supabase-rls/agent.ts` Plan-phase output:
-  - For each table flagged with `§11.5` (RLS off) → emit `TestPlanEntry { test_id: cc-11-5-<table>, control_id: '11.5', required_synthetic_resources: { identities: 2, tenants: 2 } }`
-  - For each `§11.6` (broad `USING (true)`) → `cc-11-6-<table>` entry
-  - For each `§11.9` (all-authenticated) → `cc-11-9-<table>` entry
-  - For each bucket flagged `§11.12` (public) → `cc-11-12-<bucket>` entry
+  - For each table flagged with `cc-11-5` (RLS off) → emit `TestPlanEntry { test_id: cc-11-5-<table>, control_id: 'cc-11-5', required_synthetic_resources: { identities: 2, tenants: 2 } }`
+  - For each `cc-11-6` (broad `USING (true)`) → `cc-11-6-<table>` entry
+  - For each `cc-11-9` (all-authenticated policy) → `cc-11-9-<table>` entry. The active test (catalog file `cc-11-9-all-auth-cross-tenant-access.ts`) attempts a cross-tenant SELECT under an authenticated session; if the policy grants all rows to `authenticated`, the read returns rows from other tenants → `proven_allowed`.
+  - For each bucket flagged `cc-11-12` (public) → `cc-11-12-<bucket>` entry
 - After Exercise, read `active-validation-results.json`; cross-reference outcomes against schema-side findings; emit corroboration/contradiction metadata that step 10e uses for promotion.
 - Agent does NOT change its own classifications. Promotion logic lives in step 10e.
 

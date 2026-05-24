@@ -14,15 +14,15 @@ Authn agent declares the no-auth-protected-route and non-admin-to-admin-route te
 ## What lands
 
 - Extend `src/agents/authn/agent.ts` Plan-phase to emit `TestPlanEntry`s for:
-  - `§11.1` no-auth call against detected protected routes (synthetic unauthenticated request)
-  - `§11.2` admin-route call as non-admin synthetic identity
+  - `cc-11-1` no-auth call against detected protected routes (synthetic unauthenticated request) — catalog file `cc-11-1-frontend-only-no-auth.ts`
+  - `cc-11-2` admin-route call as non-admin synthetic identity — catalog file `cc-11-2-non-admin-to-admin-route.ts`
 - After Exercise, read back outcomes; emit corroboration metadata for step 10e.
 
 ## Done when
 
-- Fixture run with Mode B against the seeded frontend-only-protected route: `§11.1` → `proven_allowed` → upgraded.
-- Fixture run with Mode B against the seeded admin-without-server-check route: `§11.2` → `proven_allowed` → upgraded.
-- Fixture run against a server-check-present variant: `§11.2` → `proven_denial` → readiness `proven_in_sandbox`.
+- Fixture run with Mode B against the seeded frontend-only-protected route: `cc-11-1` → `proven_allowed` → upgraded.
+- Fixture run with Mode B against the seeded admin-without-server-check route: `cc-11-2` → `proven_allowed` → upgraded.
+- Fixture run against a server-check-present variant: `cc-11-2` → `proven_denial` → readiness `proven_in_sandbox`.
 - Mode A behavior unchanged.
 
 ## Guardrails
@@ -35,4 +35,4 @@ Authn agent declares the no-auth-protected-route and non-admin-to-admin-route te
 
 - `PHASE_2_PLAN.md` §4.x authn extension, §5.3 (promotion path)
 - Phase 1 step 10 (authn baseline)
-- Step 07 catalog tests `cc-11-2`
+- Step 07 catalog tests `cc-11-1`, `cc-11-2`

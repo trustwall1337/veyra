@@ -26,7 +26,7 @@ Single failure boundary for both Synthesize and Cleanup. The agent reads `scan-p
 
 - Wrapper around `@supabase/supabase-js` with service-role key. Read key from env var named by `--supabase-service-role-key` (env-var name only, never the key itself on argv).
 - Refuses to operate against a project_ref that matches any read-only Supabase project ref in the scan (sandbox must be distinct).
-- Refuses to operate if `user_metadata.veyra_scan_id` rows already exist for a prefix from this `scan_id` — assumes orphan from prior failed scan, requires manual cleanup first.
+- Refuses to operate if **any** rows with the Veyra synthetic-data namespace prefix (`veyra-synth-` regardless of `scan_id`) already exist — catches orphans from any prior failed scan, not only the current one. Requires manual cleanup before this scan can proceed. The orphan-detection query is narrowly scoped to the namespace prefix; it does not enumerate the full user table.
 
 ## Done when
 

@@ -14,16 +14,16 @@ Authz-tenant agent declares the cross-tenant tests it wants and reads back resul
 ## What lands
 
 - Extend `src/agents/authz-tenant/agent.ts` Plan-phase to emit `TestPlanEntry`s for:
-  - `§11.3` direct-object-access on each sensitive route detected by Semgrep
-  - `§11.4` client-tenant-id-override on each detected client-tenant-id usage
-  - `§11.9` cross-tenant write attempts
+  - `cc-11-3` direct-object-access on each sensitive route detected by Semgrep
+  - `cc-11-4` client-tenant-id-override on each detected client-tenant-id usage
+- Cross-tenant write attempts are NOT a separate active test in Phase 2. Cross-tenant write succeeds via either `cc-11-3` (no per-row check) or `cc-11-9` (all-authenticated policy) — those controls are owned by `authz-tenant` (cc-11-3 above) and `supabase-rls` (cc-11-9, see step 10a) respectively. This agent does NOT emit a cc-11-9 plan entry.
 - After Exercise, read back outcomes; emit corroboration metadata for step 10e.
 - Coverage gaps on routes that couldn't be tested actively (e.g. no synthetic resource type matches) stay `coverage_gap`, not silent absence.
 
 ## Done when
 
-- Fixture run with Mode B: `§11.4` client-tenant-id-override → schema-side `likely_issue` + active `proven_allowed` → upgraded.
-- Fixture run with Mode B: `§11.3` direct-object-access → outcome (proven_allowed or proven_denial) recorded per seeded fixture variant.
+- Fixture run with Mode B: `cc-11-4` client-tenant-id-override → schema-side `likely_issue` + active `proven_allowed` → upgraded.
+- Fixture run with Mode B: `cc-11-3` direct-object-access → outcome (proven_allowed or proven_denial) recorded per seeded fixture variant.
 - Fixture run with Mode A: no active plan entries emitted; agent behavior unchanged.
 
 ## Guardrails
@@ -37,4 +37,4 @@ Authz-tenant agent declares the cross-tenant tests it wants and reads back resul
 - `PHASE_2_PLAN.md` §4.x authz-tenant extension, §5.3 (promotion path)
 - Phase 1 step 11 (authz-tenant baseline)
 - Step 02 `TestPlanEntry`
-- Step 07 catalog tests `cc-11-3`, `cc-11-4`, `cc-11-9`
+- Step 07 catalog tests `cc-11-3`, `cc-11-4` (cc-11-9 is owned by step 10a `supabase-rls`)

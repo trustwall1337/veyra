@@ -21,11 +21,12 @@ The gate that says "Phase 2 is done." No new code. Run the full Mode B pipeline 
 All of the following hold against the extended vulnerable fixture from step 13:
 
 - `--mode sandbox_active_validation` against the sandbox produces:
-  - `proven_denial` for the seeded `§11.5` RLS-ON table variant (cross-tenant SELECT denied → proves the control works for that variant)
-  - `proven_allowed` for the seeded `§11.6` `USING (true)` policy table
-  - `proven_allowed` for the seeded `§11.12` public bucket (anon download)
-  - `proven_allowed` for `§11.4` client-tenant_id override
-  - `proven_denial` or `proven_allowed` for `§11.3` direct-object-access, depending on fixture variant
+  - `proven_allowed` for the seeded `cc-11-5` RLS-OFF table variant (cross-tenant SELECT succeeds — proves the gap)
+  - `proven_denial` for the seeded `cc-11-5` RLS-ON table variant (cross-tenant SELECT denied — proves the control works when enabled); rule 2 of step 10e then computes `readiness_status: proven_in_sandbox` for that variant even though the heuristic strength was `high`
+  - `proven_allowed` for the seeded `cc-11-6` `USING (true)` policy table
+  - `proven_allowed` for the seeded `cc-11-12` public bucket (anon download)
+  - `proven_allowed` for `cc-11-4` client-tenant_id override
+  - `proven_denial` or `proven_allowed` for `cc-11-3` direct-object-access, depending on fixture variant
 - `cleanup-proof.json` shows `residual_count: 0` per resource type.
 - The report renders AI-enriched explanations under a distinct heading. Each AI output has `confidence` and `uncertainty_notes`.
 - `--no-ai` produces a complete report; deterministic + active findings still surface.
