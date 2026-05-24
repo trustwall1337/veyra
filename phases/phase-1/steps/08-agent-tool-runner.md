@@ -1,6 +1,6 @@
 # Step 08 — Tool-runner agent
 
-**Status:** not started
+**Status:** done (2026-05-24)
 **Maps to:** `PHASE_1_PLAN §7 Task 9`, §4.6
 **Produces:** `src/agents/tool-runner/`
 **Depends on:** 05, 06, 07
