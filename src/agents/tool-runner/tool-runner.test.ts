@@ -167,12 +167,19 @@ describe('toolRunnerAgent', () => {
     expect(semgrep.findings[0]?.ruleId).toBe('direct-object-access-by-id');
     expect(semgrep.findings[0]?.line).toBe(12);
 
-    // Per step 08b (revision §9 Option B): tool-runner no longer emits
-    // confirmed_issue / likely_issue findings. Those are produced by the
-    // assertion predicates in steps 09b–12b. Only coverage_gap findings
-    // (when a scanner did not complete) come from this agent — the happy
-    // path therefore has zero findings.
-    expect(result.findings).toHaveLength(0);
+    // Step 23 retro-f3 + step 14 TODO line 133-136: when gitleaks /
+    // OSV scanners run successfully and emit findings, tool-runner
+    // promotes each direct finding to a Finding tagged with the
+    // per-scanner cc-11-N classification (gitleaks → cc-11-8
+    // confirmed_issue per FPP §11, OSV → cc-11-10 likely_issue).
+    // Semgrep's per-hit Findings stay in the Pass-1 predicate path
+    // (the assertion agents 10b/11b/12b resolve each rule's cc-11-N
+    // target from `extra.message`). The happy-path mock here has
+    // gitleaks(1) + osv(1) + semgrep(1), so 2 Findings are expected
+    // from this agent's promotion path.
+    expect(result.findings).toHaveLength(2);
+    const findingControls = result.findings.map((f) => f.control_id).sort();
+    expect(findingControls).toEqual(['cc-11-10', 'cc-11-8']);
 
     // The new artifact is scan-facts (revision §3.1 + retro-08b).
     // The artifact value contains the consolidated ScanFact[] only —

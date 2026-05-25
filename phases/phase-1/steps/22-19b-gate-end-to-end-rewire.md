@@ -1,12 +1,12 @@
 # Step 22 — Rewire the 19b fixture gate to run end-to-end against orchestrator output
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** none of the planned sections directly — surfaced by step 21's post-mortem on 2026-05-25. Step 19b's gate passes today because it tests building blocks (predicate purity, hypothesis disposition, markdown rendering shape) in isolation; the three bugs fixed in step 21 (nested-scanId path, reporter ignoring inventory + declared-context, coverage_gap not surfacing) all slipped through 19b because the gate never executed the orchestrator's real artifact-writing path.
 **Amends Phase 1 step:** none (19b's contract stays; this step adds an end-to-end execution layer on top)
 **Produces:** new test or `/scan-fixture` harness that runs the full CLI pipeline against `examples/vulnerable-lovable-supabase/` and asserts the artifact directory + report shape
 **Depends on:** 18b (orchestrator wire-up), 19b (gate contract), 21 (the three bugfixes that motivate this gate)
 **Executed by:** plain coding pass + `step-reviewer` subagent at the end
-**Verification:** the new end-to-end test runs against the fixture under `pnpm test` (or under a dedicated harness), produces a non-empty `findings.json`, and asserts the rendered report cites real declared-context + inventory content.
+**Verification:** the new end-to-end test runs against the fixture under `pnpm test` (or under a dedicated harness), the orchestrator's emitted `readiness-report.json` contains non-empty findings (per the persistence layout: findings live inside `launch_blockers` + `control_cards[].findings`; there is no separate `findings.json` artifact in Phase 1), and the rendered Markdown report cites real declared-context + inventory content. Step-21's contract has the same persistence layout.
 
 ## Goal
 

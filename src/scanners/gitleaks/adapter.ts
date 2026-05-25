@@ -111,6 +111,17 @@ export function buildGitleaksArgs(input: GitleaksInput): readonly string[] {
     'detect',
     '--source',
     input.projectPath,
+    // Step 23 Bug B: scan the FILESYSTEM under --source only. Without
+    // --no-git, gitleaks's `detect` mode walks the surrounding repo's
+    // git history (gitleaks looks upward for a .git directory and
+    // scans every committed file), which leaks findings from files
+    // outside the customer's project — e.g. a customer running
+    // `veyra scan --project ./my-app` from their home directory
+    // could see secrets from neighbouring repos in their report.
+    // --no-git binds the scan to the filesystem subtree under
+    // --source, matching the customer's mental model of "this scans
+    // the project I named."
+    '--no-git',
     '--report-format',
     'json',
     '--report-path',

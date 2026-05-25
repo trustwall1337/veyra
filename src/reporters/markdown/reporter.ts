@@ -103,6 +103,12 @@ function renderExecutiveSummary(report: ReadinessReport): string {
     `- evidence_present: ${String(report.readiness_summary.evidence_present)}`,
     `- needs_review: ${String(report.readiness_summary.needs_review)}`,
     `- launch_blockers: ${String(report.readiness_summary.launch_blocker)}`,
+    '',
+    // Step 23 Bug E: user-visible doc that the deterministic Phase 1
+    // baseline does not promote controls to evidence_present; Phase 2
+    // active validation does. Without this note a reader sees
+    // `evidence_present: 0` and may read it as a scan defect.
+    STRINGS.EVIDENCE_PRESENT_PHASE2_NOTE,
   ];
   return lines.join('\n');
 }

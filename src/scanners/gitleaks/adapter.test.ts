@@ -69,6 +69,15 @@ describe('buildGitleaksArgs — guardrails', () => {
     expect(args[0]).toBe('detect');
   });
 
+  it('step 23 Bug B regression: includes --no-git so scope is bounded by --source', () => {
+    // Without --no-git, gitleaks `detect` walks the surrounding git
+    // history and emits findings from outside --source. A regression
+    // here would leak a customer's repo-wide secrets into a report
+    // for a single sub-project.
+    const args = buildGitleaksArgs({ projectPath: '/x' });
+    expect(args).toContain('--no-git');
+  });
+
   it('NEVER passes any mutation flag (--fix, --apply, --commit, --add)', () => {
     const args = buildGitleaksArgs({ projectPath: '/x' });
     const forbidden = ['--fix', '--apply', '--commit', '--add', '--write'];

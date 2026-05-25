@@ -12,6 +12,17 @@
 
 The Phase 1 revision is done when the fixture validation gate confirms: (a) the three-tier report renders correctly, (b) `--no-ai` produces an identical Findings set to the AI-enabled run, (c) AIConcerns are emitted per the threshold flag and respect `expected-ai-concerns.json`, (d) the assertion layer is deterministic — same `ScanFact[]` + `Hypothesis[]` fed twice produces byte-identical `findings.json` + `ai-concerns.json`.
 
+> **End-to-end companion gate.** 19b's four gates feed synthetic
+> inputs into individual functions. The end-to-end harness that
+> actually runs the orchestrator against the fixture and reads back
+> the on-disk artifact directory lives in step
+> [`22-19b-gate-end-to-end-rewire.md`](./22-19b-gate-end-to-end-rewire.md)
+> (test file: `src/cli/end-to-end-fixture.test.ts`). 22 catches the
+> four step-21 bug classes — path-doubling, ignored-artifact,
+> missing-scanner coverage_gap, topology ordering — which 19b's
+> synthetic harnesses could not see. 22 ADDS a gate; 19b's contract
+> stays as written.
+
 ## What lands
 
 - Nothing new in `src/`. This is a verification pass.

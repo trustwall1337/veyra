@@ -35,10 +35,13 @@ import type {
 } from '../../types/scan-fact.js';
 
 import { loadBucketsArtifact, evaluateBuckets } from './buckets.js';
+import { envDeclarationsToScanFacts } from '../product-understanding/inventory/bootstrap.js';
+
 import { parseSchemaSql } from './parser.js';
 import {
   predicateAllAuthenticated,
   predicateBroadPolicy,
+  predicatePrivilegedClientKey,
   predicatePublicBucket,
   predicateRlsMissing,
 } from './predicates.js';
@@ -52,7 +55,16 @@ import type {
 const METADATA: AgentMetadata = {
   id: 'supabase-rls',
   version: '0.1.0',
-  declared_dependencies: ['supabase-schema-sql', 'storage-buckets-json'],
+  // Step 23 retro-f2: declare inventory-bootstrap.json so the
+  // topological sort sequences supabase-rls after product-understanding
+  // (which writes the inventory). Without this dep, supabase-rls could
+  // run before the inventory exists and the cc-11-7 predicate would
+  // silently emit no findings.
+  declared_dependencies: [
+    'supabase-schema-sql',
+    'storage-buckets-json',
+    'inventory-bootstrap.json',
+  ],
   produces: ['supabase-tables.json'],
 };
 
@@ -224,13 +236,43 @@ export function createSupabaseRlsAgent(): VeyraAgent<
       const bucketFacts = bucketRecords !== undefined
         ? bucketRecordsToFacts(bucketRecords, input.schemaSqlPath)
         : [];
-      const allFacts: readonly ScanFact[] = [...schemaFacts, ...bucketFacts];
+
+      // Step 23 Bug A: read env_declarations from
+      // inventory-bootstrap.json (when present) and convert each
+      // declaration into a local_file/env_declaration ScanFact so the
+      // cc-11-7 predicate can consume it under the same ScanFact
+      // contract as the schema + bucket predicates. Absent or
+      // unreadable inventory is tolerated — cc-11-7 simply produces
+      // no findings (no scope_creep / no synthetic positives).
+      const envFacts: readonly ScanFact[] = await (async () => {
+        if (input.inventoryArtifactPath === undefined) return [];
+        try {
+          const inventoryText = await fs.readFile(
+            input.inventoryArtifactPath,
+            'utf8',
+          );
+          const inv = JSON.parse(inventoryText) as {
+            observed_evidence?: { env_declarations?: readonly string[] };
+          };
+          const decls = inv.observed_evidence?.env_declarations ?? [];
+          return envDeclarationsToScanFacts(decls, context.projectRoot);
+        } catch {
+          return [];
+        }
+      })();
+
+      const allFacts: readonly ScanFact[] = [
+        ...schemaFacts,
+        ...bucketFacts,
+        ...envFacts,
+      ];
 
       const predicateFindings: readonly Finding[] = [
         ...predicateRlsMissing(allFacts),
         ...predicateBroadPolicy(allFacts),
         ...predicateAllAuthenticated(allFacts),
         ...predicatePublicBucket(allFacts),
+        ...predicatePrivilegedClientKey(allFacts),
       ];
 
       // Retro-09b f6: only the coverage_gap-only builder remains for

@@ -55,6 +55,15 @@ export interface SupabaseRlsInput {
    * coverage_gap.
    */
   readonly storageBucketsArtifactPath?: string;
+  /**
+   * Step 23 Bug A: optional path to `inventory-bootstrap.json`. When
+   * supplied, the agent reads `observed_evidence.env_declarations`
+   * and converts each declaration into a `local_file/env_declaration`
+   * ScanFact so the `predicatePrivilegedClientKey` predicate (cc-11-7)
+   * can run alongside the schema + bucket predicates. Absent input
+   * is silently tolerated — cc-11-7 simply produces no findings.
+   */
+  readonly inventoryArtifactPath?: string;
 }
 
 export interface SupabaseRlsOutput {

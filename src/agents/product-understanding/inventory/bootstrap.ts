@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
 import { redactSecrets } from '../../../ai/sanitization.js';
 import { type Result, err, ok } from '../../../types/result.js';
+import type { ScanFact } from '../../../types/scan-fact.js';
 import type { ValidationPolicy } from '../../../types/validation-policy.js';
 
 import {
@@ -189,6 +191,45 @@ export async function writeInventoryArtifact(
     const m = cause instanceof Error ? cause.message : String(cause);
     return err(new BootstrapError(`failed to write ${filePath}: ${m}`));
   }
+}
+
+/**
+ * Step 23 Bug A: convert deterministic env_declarations from the
+ * inventory into `ScanFact`s so Pass-1 predicates can consume them
+ * uniformly. Per codex retro-f2 for step 23: do NOT have predicates
+ * read `inventory-bootstrap.json` directly — that bypasses the
+ * ScanFact contract. Instead emit env declarations as facts with
+ * `source.kind: 'local_file'` + `signal_kind: 'env_declaration'`.
+ *
+ * Each fact's `fact_id` is content-addressed (sha256 of the env name)
+ * so re-running against the same inventory produces byte-identical
+ * facts (assertion-replay determinism, REVISION_AI_SHAPE §7).
+ */
+export function envDeclarationsToScanFacts(
+  envDecls: readonly string[],
+  projectRoot: string,
+): readonly ScanFact[] {
+  const argsFingerprint = createHash('sha256').update(projectRoot).digest('hex');
+  return envDecls.map((name) => {
+    const factId = createHash('sha256')
+      .update(`env_declaration:${projectRoot}:${name}`)
+      .digest('hex');
+    const fact: ScanFact = {
+      fact_id: factId,
+      source: {
+        kind: 'local_file',
+        signal_kind: 'env_declaration',
+        payload: {
+          sanitized_excerpt: name,
+          content_kind: 'text',
+        },
+      },
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: argsFingerprint,
+      redacted: false,
+    };
+    return fact;
+  });
 }
 
 /**

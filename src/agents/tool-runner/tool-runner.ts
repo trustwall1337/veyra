@@ -561,16 +561,31 @@ function findingsForSection(section: ScannerSection): Finding[] {
   if (section.status !== 'ok') {
     return [coverageGapFinding(section)];
   }
-  return [];
+  // Step 23 retro-f3 (and step 14's TODO at line 133-136 above):
+  // when gitleaks / OSV run successfully, promote each direct
+  // finding to a Finding tagged with the per-scanner cc-11-N
+  // classification. Per FPP §11: gitleaks is direct deterministic
+  // evidence (cc-11-8 confirmed_issue); OSV is a dependency-presence
+  // signal (cc-11-10 likely_issue, never confirmed). Semgrep stays
+  // in the Pass-1 predicate path (assertion agents 10b/11b) because
+  // each rule's cc-11-N target is encoded in the rule's `message`,
+  // not directly in the scanner_id; the predicates resolve that
+  // mapping.
+  const out: Finding[] = [];
+  if (
+    section.scannerId === GITLEAKS_ID ||
+    section.scannerId === OSV_ID
+  ) {
+    section.findings.forEach((f, i) => {
+      out.push(scannerFinding(section.scannerId, f, i));
+    });
+  }
+  return out;
 }
 
-// Functions retained for reference but unused after the 08b migration.
-// Each scanner adapter now produces `ScanFact[]` directly; the
-// assertion predicates (09b–12b) build Finding objects from those
-// facts. Keeping the helpers as unused suppresses dead-code style
-// churn in step 14 where coverage_gap classification still references
-// the per-scanner classification table.
-void scannerFinding;
+// Reference to keep the helpers from being dead-code-stripped — the
+// Pass-1 predicates and (retro-f3 above) the gitleaks/osv promotion
+// path both depend on them.
 void evidenceRefFor;
 void controlIdForHit;
 

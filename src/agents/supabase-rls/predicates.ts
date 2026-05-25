@@ -322,3 +322,100 @@ export function predicatePublicBucket(
   }
   return out;
 }
+
+// ───────────────────────────────────────────────────────────────────
+// Step 23 Bug A: cc-11-7 (privileged client key)
+// ───────────────────────────────────────────────────────────────────
+//
+// Client-shipped env namespaces that ship the value to browsers /
+// mobile apps. Any privileged key declared under one of these is
+// effectively public.
+const CLIENT_EXPOSED_PREFIXES: readonly string[] = [
+  'VITE_',
+  'NEXT_PUBLIC_',
+  'EXPO_PUBLIC_',
+  'REACT_APP_',
+  'PUBLIC_',
+];
+
+// Substrings that strongly imply a privileged credential. The
+// matcher is case-insensitive at call time.
+const PRIVILEGED_NAME_PATTERNS: readonly string[] = [
+  'SERVICE_ROLE',
+  'SECRET',
+  'PRIVATE_KEY',
+  'API_KEY',
+];
+
+// Canonical exact-shape match per FPP §11: the Supabase service-role
+// key in a Vite env namespace is the marquee Lovable+Supabase
+// footgun. Exact-shape match → `confirmed_issue`. Other matches
+// (e.g. `VITE_FOO_SECRET`) stay `likely_issue` per the step 23
+// Guardrails: "Do NOT promote any heuristic finding to
+// confirmed_issue for cc-11-7's fix — the VITE_*SERVICE_ROLE* match
+// is canonical-name-list + RLS-bypass-capable, which per CLAUDE.md /
+// FPP §11 may be confirmed_issue; non-canonical name matches stay
+// likely_issue."
+const CANONICAL_SERVICE_ROLE = /^(VITE_|NEXT_PUBLIC_|EXPO_PUBLIC_).*SERVICE_ROLE/;
+
+interface EnvFact {
+  readonly fact_id: string;
+  readonly name: string;
+}
+
+function unpackEnvFact(fact: ScanFact): EnvFact | null {
+  if (fact.source.kind !== 'local_file') return null;
+  if (fact.source.signal_kind !== 'env_declaration') return null;
+  const name = fact.source.payload?.sanitized_excerpt;
+  if (typeof name !== 'string' || name.length === 0) return null;
+  return { fact_id: fact.fact_id, name };
+}
+
+function clientExposedPrefix(name: string): string | undefined {
+  return CLIENT_EXPOSED_PREFIXES.find((p) => name.startsWith(p));
+}
+
+function privilegedNameHit(name: string): string | undefined {
+  const upper = name.toUpperCase();
+  return PRIVILEGED_NAME_PATTERNS.find((p) => upper.includes(p));
+}
+
+/**
+ * cc-11-7: a privileged credential declared in a client-exposed env
+ * namespace is effectively public. The most common footgun in the
+ * Lovable+Supabase ecosystem is `VITE_SUPABASE_SERVICE_ROLE_KEY` —
+ * a service-role key shipped to the browser via Vite's
+ * `import.meta.env`.
+ *
+ * Predicate input is `ScanFact[]` only (env declarations are
+ * surfaced as facts by `envDeclarationsToScanFacts` in the
+ * bootstrap inventory). No direct artifact reads here — keeps the
+ * Pass-1 contract intact (constraint 10 + retro step-23 f2).
+ */
+export function predicatePrivilegedClientKey(
+  facts: readonly ScanFact[],
+): readonly Finding[] {
+  const out: Finding[] = [];
+  for (const fact of facts) {
+    const env = unpackEnvFact(fact);
+    if (env === null) continue;
+    const prefix = clientExposedPrefix(env.name);
+    if (prefix === undefined) continue;
+    const matched = privilegedNameHit(env.name);
+    if (matched === undefined) continue;
+    const isCanonical = CANONICAL_SERVICE_ROLE.test(env.name);
+    out.push({
+      id: `cc-11-7-${env.fact_id}`,
+      control_id: 'cc-11-7',
+      finding_type: isCanonical ? 'confirmed_issue' : 'likely_issue',
+      evidence_strength: 'high',
+      reproducibility: 'static',
+      review_action: 'fix_before_launch',
+      blast_radius: isCanonical ? 'user_data' : 'unknown',
+      title: `Privileged credential "${env.name}" declared in client-exposed env namespace`,
+      summary: `Env declaration "${env.name}" matches a client-shipped namespace prefix "${prefix}" and a privileged-name pattern "${matched}". A value placed in this env name is shipped to the browser bundle. ${isCanonical ? 'This appears launch-blocking' : 'Needs human review'}. ${UNCERTAINTY_NOTE}.`,
+      evidence_refs: [env.fact_id],
+    });
+  }
+  return out;
+}

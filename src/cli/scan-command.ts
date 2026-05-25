@@ -13,7 +13,11 @@ import {
   createScanOrchestrator,
   type ScanOrchestrator,
 } from '../core/orchestrator/scan-orchestrator.js';
-import { registerPhase1Agents } from './agent-registration.js';
+import {
+  bundledRulesDir,
+  discoverLockfile,
+  registerPhase1Agents,
+} from './agent-registration.js';
 import type { AgentExecutionContext, AgentLogger } from '../types/agent.js';
 import type { ProviderId } from '../types/identity.js';
 import { type Result, err, ok } from '../types/result.js';
@@ -160,6 +164,20 @@ export interface ScanCommandDeps {
    * the real Phase 1 entries.
    */
   readonly providerRegistry: ProviderRegistry;
+  /**
+   * Step 23 retro-f1: optional scanner-runner overrides for the
+   * tool-runner agent. Production callers leave this undefined and
+   * the tool-runner falls back to its default `spawn`-based runners.
+   * The end-to-end fixture gate injects mocks that emit fixture-shape
+   * JSON deterministically, so Bug C / Bug D regressions are caught
+   * regardless of which scanner binaries are installed on the dev /
+   * CI machine.
+   */
+  readonly scannerRunnersOverride?: {
+    readonly gitleaks?: import('../scanners/gitleaks/types.js').GitleaksRunner;
+    readonly osv?: import('../scanners/osv/types.js').OsvRunner;
+    readonly semgrep?: import('../scanners/semgrep/types.js').SemgrepRunner;
+  };
 }
 
 /**
@@ -560,9 +578,20 @@ export async function runScan(
   };
 
   const orchestrator = deps.orchestratorFactory();
+  // Step 23 Bug C + Bug D: auto-discover the bundled `rules/` and any
+  // lockfile under projectRoot so semgrep + OSV adapters get the
+  // inputs they need without the customer passing extra flags.
+  const discoveredLockfile = await discoverLockfile(inputs.projectRoot);
   registerPhase1Agents(orchestrator, {
     ...(inputs.supabaseSchemaPath !== undefined
       ? { supabaseSchemaSqlPath: inputs.supabaseSchemaPath }
+      : {}),
+    rulesPath: bundledRulesDir(),
+    ...(discoveredLockfile !== undefined
+      ? { lockfilePath: discoveredLockfile }
+      : {}),
+    ...(deps.scannerRunnersOverride !== undefined
+      ? { runners: deps.scannerRunnersOverride }
       : {}),
   });
   let exitCode = 0;

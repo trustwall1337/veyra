@@ -16,7 +16,9 @@
  * imports test stays green — core never imports from agents/.
  */
 
+import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { createAuthnAgent } from '../agents/authn/index.js';
 import { createAuthzTenantAgent } from '../agents/authz-tenant/index.js';
@@ -25,6 +27,9 @@ import { evidenceReportAgent } from '../agents/evidence-report/index.js';
 import { productUnderstandingAgent } from '../agents/product-understanding/index.js';
 import { createSupabaseRlsAgent } from '../agents/supabase-rls/index.js';
 import { toolRunnerAgent } from '../agents/tool-runner/index.js';
+import type { GitleaksRunner } from '../scanners/gitleaks/types.js';
+import type { OsvRunner } from '../scanners/osv/types.js';
+import type { SemgrepRunner } from '../scanners/semgrep/types.js';
 import { type ScanOrchestrator } from '../core/orchestrator/scan-orchestrator.js';
 import type { AgentExecutionContext, AgentResult } from '../types/agent.js';
 
@@ -33,6 +38,49 @@ export interface RegistrationOptions {
   readonly storageBucketsArtifactPath?: string;
   readonly lockfilePath?: string;
   readonly rulesPath?: string;
+  /**
+   * Step 23 Bug C + D + retro-f1: scanner-runner injection. Production
+   * callers pass no runners and the tool-runner falls back to the
+   * default `child_process.spawn` runner. The end-to-end fixture gate
+   * passes mocks that emit fixture-shape JSON deterministically so the
+   * Bug C / Bug D regressions are caught regardless of which scanner
+   * binaries are installed on the dev / CI machine.
+   */
+  readonly runners?: {
+    readonly gitleaks?: GitleaksRunner;
+    readonly osv?: OsvRunner;
+    readonly semgrep?: SemgrepRunner;
+  };
+}
+
+/**
+ * Step 23 Bug C: locate the bundled `rules/` directory at the repo
+ * root, relative to this module's URL. ESM-safe (works regardless of
+ * `process.cwd()`).
+ */
+export function bundledRulesDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  // src/cli/ → ../../rules
+  return path.resolve(here, '..', '..', 'rules');
+}
+
+/**
+ * Step 23 Bug D: shallow lockfile discovery under `projectRoot`.
+ * Probes the canonical names in npm / pnpm / yarn order. Returns
+ * the first existing path or `undefined` if none found.
+ */
+export async function discoverLockfile(projectRoot: string): Promise<string | undefined> {
+  const candidates = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'];
+  for (const name of candidates) {
+    const candidate = path.join(projectRoot, name);
+    try {
+      const s = await fs.stat(candidate);
+      if (s.isFile()) return candidate;
+    } catch {
+      // missing — try next
+    }
+  }
+  return undefined;
 }
 
 export function registerPhase1Agents(
@@ -50,6 +98,7 @@ export function registerPhase1Agents(
   orch.register(toolRunnerAgent, () => ({
     ...(options.lockfilePath !== undefined ? { lockfilePath: options.lockfilePath } : {}),
     ...(options.rulesPath !== undefined ? { rulesPath: options.rulesPath } : {}),
+    ...(options.runners !== undefined ? { runners: options.runners } : {}),
   }));
 
   // 3. supabase-rls (Layer 4 Pass-1 predicate, schema-driven).
@@ -59,11 +108,17 @@ export function registerPhase1Agents(
   if (options.supabaseSchemaSqlPath !== undefined) {
     const supabaseSchemaSqlPath = options.supabaseSchemaSqlPath;
     const storageBucketsArtifactPath = options.storageBucketsArtifactPath;
-    orch.register(createSupabaseRlsAgent(), () => ({
+    orch.register(createSupabaseRlsAgent(), (context: AgentExecutionContext) => ({
       schemaSqlPath: supabaseSchemaSqlPath,
       ...(storageBucketsArtifactPath !== undefined
         ? { storageBucketsArtifactPath }
         : {}),
+      // Step 23 Bug A: wire inventory-bootstrap.json into supabase-rls
+      // so its new cc-11-7 predicate can read env_declarations.
+      inventoryArtifactPath: path.join(
+        context.artifactDir,
+        'inventory-bootstrap.json',
+      ),
     }));
   }
 

@@ -25,6 +25,9 @@ export const STRINGS = {
   SUMMARY_BLOCKERS_PREFIX:
     'The following items appear launch-blocking and need human review:',
 
+  EVIDENCE_PRESENT_PHASE2_NOTE:
+    '> `evidence_present` is populated by Phase 2 active validation. In Phase 1 the deterministic baseline only emits negative findings (likely / coverage_gap / confirmed); a 0 here reflects that, not a defect of the scan.',
+
   CONTEXT_NO_CONTEXT_AVAILABLE:
     'No declared-context artifact was found for this scan.',
 
