@@ -1,6 +1,6 @@
 # Step 15 — Lovable MCP connector
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 7`, §3 Step 1 (Lovable allowlist), `CLAUDE.md §MCP discipline`
 **Produces:** `src/connectors/lovable/`
 **Depends on:** 02
