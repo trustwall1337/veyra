@@ -1,6 +1,6 @@
 # Step 12b — business-logic as deterministic assertion predicate
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §10 step 12 row, §4.1 Pass-1 rule`
 **Amends Phase 1 step:** 12
 **Produces:** agent reshape at `src/agents/business-logic/`
