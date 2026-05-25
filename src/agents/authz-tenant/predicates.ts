@@ -68,24 +68,67 @@ function sensitiveTablesFromFacts(
   return SENSITIVE_NAMES;
 }
 
-/** cc-11-3: direct-object-access on a sensitive table. */
+/**
+ * cc-11-3: direct-object-access on a sensitive table.
+ *
+ * Per retro-11b f3: a Semgrep direct-object-access hit alone does NOT
+ * justify `likely_issue` — the predicate requires corroboration from
+ * either (a) an explicit `schema_element/table` ScanFact whose name
+ * matches the excerpt, or (b) the canonical sensitive-name set from
+ * the project's deterministic name list. Without table corroboration,
+ * the hit becomes a `coverage_gap` so the reviewer is prompted to
+ * check the table sensitivity manually rather than the predicate
+ * over-classifying.
+ */
 export function predicateDirectObjectAccess(
   facts: readonly ScanFact[],
 ): readonly Finding[] {
-  const sensitive = sensitiveTablesFromFacts(facts);
+  const tableFactById = new Map<string, string>();
+  for (const f of facts) {
+    if (f.source.kind !== 'schema_element') continue;
+    if (f.source.element_kind !== 'table') continue;
+    const name = f.source.name;
+    if (typeof name === 'string' && name.length > 0) {
+      const bare = name.includes('.') ? name.slice(name.indexOf('.') + 1) : name;
+      tableFactById.set(bare, f.fact_id);
+      tableFactById.set(name, f.fact_id);
+    }
+  }
+  const schemaTableNames = new Set(tableFactById.keys());
+  const hasSchemaFacts = schemaTableNames.size > 0;
+
   const out: Finding[] = [];
   for (const f of facts) {
     const id = ruleIdOf(f);
     if (id === undefined || !DIRECT_OBJECT_RULE_IDS.has(id)) continue;
-    // The rule's sanitized_excerpt may carry the table; if not, we
-    // still emit (assertion-predicate scope is the rule itself).
     const excerpt =
       f.source.kind === 'scanner_match'
         ? f.source.payload.sanitized_excerpt
         : '';
-    const tableHit = Array.from(sensitive).find((name) =>
+    // Prefer schema_element evidence; fall back to canonical name set.
+    const candidatePool = hasSchemaFacts ? schemaTableNames : SENSITIVE_NAMES;
+    const tableHit = Array.from(candidatePool).find((name) =>
       new RegExp(`['"\`]${name}['"\`]`).test(excerpt),
     );
+    if (tableHit === undefined) {
+      // No table corroboration → coverage_gap, not likely_issue.
+      out.push({
+        id: `cc-11-3-coverage-gap-${f.fact_id}`,
+        control_id: 'cc-11-3',
+        finding_type: 'coverage_gap',
+        evidence_strength: 'low',
+        reproducibility: 'manual_review_required',
+        review_action: 'review_before_launch',
+        blast_radius: 'tenant_data',
+        title: 'Direct-object-access rule fired without table corroboration',
+        summary: `Semgrep rule "${id}" matched but no schema_element table or canonical sensitive-name match was found in the excerpt. Predicate could not confirm the access target is sensitive. Needs human review. ${UNCERTAINTY_NOTE}.`,
+        evidence_refs: [f.fact_id],
+      });
+      continue;
+    }
+    const evidenceRefs = [f.fact_id];
+    const tableFactId = tableFactById.get(tableHit);
+    if (tableFactId !== undefined) evidenceRefs.push(tableFactId);
     out.push({
       id: `cc-11-3-${f.fact_id}`,
       control_id: 'cc-11-3',
@@ -94,9 +137,9 @@ export function predicateDirectObjectAccess(
       reproducibility: 'static',
       review_action: 'fix_before_launch',
       blast_radius: 'tenant_data',
-      title: `Direct-object access by id on sensitive table${tableHit !== undefined ? ` "${tableHit}"` : ''}`,
-      summary: `Predicate cc-11-3 fired on Semgrep rule "${id}"${tableHit !== undefined ? ` (table "${tableHit}")` : ''}. Needs human review. ${UNCERTAINTY_NOTE}.`,
-      evidence_refs: [f.fact_id],
+      title: `Direct-object access by id on sensitive table "${tableHit}"`,
+      summary: `Predicate cc-11-3 fired on Semgrep rule "${id}" against table "${tableHit}". Needs human review. ${UNCERTAINTY_NOTE}.`,
+      evidence_refs: evidenceRefs,
       suggested_test_ids: [
         'GET /api/<sensitive>/:id as user_b should return 403',
       ],

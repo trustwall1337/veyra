@@ -1,5 +1,17 @@
+/**
+ * authz-tenant agent — Pass-1 assertion predicate over ScanFact[].
+ *
+ * Per retro-11b: reads `scan-facts.json` and dispatches to the
+ * deterministic predicate functions in `./predicates.ts`. The legacy
+ * file-walking heuristics path (heuristics.ts) is no longer the
+ * runtime path — heuristics.ts now serves as a reference for future
+ * Pass-2 hypothesis attachment, not the Pass-1 deciding code.
+ *
+ * Constraint 10: predicates accept only `readonly ScanFact[]`; this
+ * agent never reads `hypotheses.json`.
+ */
+
 import { promises as fs } from 'node:fs';
-import * as path from 'node:path';
 
 import type {
   AgentExecutionContext,
@@ -8,128 +20,59 @@ import type {
   VeyraAgent,
 } from '../../types/agent.js';
 import type { Finding } from '../../types/finding.js';
+import type { ScanFact } from '../../types/scan-fact.js';
 
-import { detectAuthzIssues, type AuthzMatch } from './heuristics.js';
+import {
+  authzCoverageGaps,
+  predicateClientTenantId,
+  predicateCrossTenantWriteRisk,
+  predicateDirectObjectAccess,
+} from './predicates.js';
 import type { AuthzTenantInput, AuthzTenantOutput } from './types.js';
 
 const METADATA: AgentMetadata = {
   id: 'authz-tenant',
-  version: '0.1.0',
-  declared_dependencies: ['scan_facts', 'supabase-tables.json'],
+  version: '0.2.0',
+  declared_dependencies: ['scan-facts.json'],
 };
 
 const UNCERTAINTY_NOTE =
-  'static authz detection; server-side authorization via SSR/middleware or row-level policies may exist but not be detected';
+  'static authz detection over ScanFact[]; server-side authorization via SSR/middleware or row-level policies may exist but not be detected';
 
-const SOURCE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx']);
-const DENY_DIRS = new Set([
-  'node_modules',
-  'dist',
-  'build',
-  '.next',
-  'coverage',
-  'out',
-  '.git',
-]);
-
-async function walkSources(
-  root: string,
-): Promise<readonly { filePath: string; content: string }[]> {
-  const out: { filePath: string; content: string }[] = [];
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (depth > 8) return;
-    let entries: import('node:fs').Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (DENY_DIRS.has(entry.name)) continue;
-      const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(abs, depth + 1);
-      } else if (entry.isFile()) {
-        const ext = path.extname(entry.name).toLowerCase();
-        if (!SOURCE_EXTS.has(ext)) continue;
-        try {
-          const content = await fs.readFile(abs, 'utf8');
-          out.push({ filePath: path.relative(root, abs), content });
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-  await walk(root, 0);
-  return out;
+interface ScanFactsArtifact {
+  readonly scan_facts?: readonly ScanFact[];
 }
 
-async function readSensitiveTableNames(
+async function readScanFacts(
   artifactPath: string | undefined,
-): Promise<readonly string[] | undefined> {
+): Promise<readonly ScanFact[] | undefined> {
   if (artifactPath === undefined) return undefined;
   try {
     const text = await fs.readFile(artifactPath, 'utf8');
-    const parsed = JSON.parse(text) as {
-      tables?: readonly { name?: string }[];
-    };
-    return (parsed.tables ?? [])
-      .map((t) => t.name)
-      .filter((n): n is string => typeof n === 'string');
+    const parsed = JSON.parse(text) as ScanFactsArtifact;
+    return parsed.scan_facts ?? [];
   } catch {
     return undefined;
   }
 }
 
-function buildFinding(match: AuthzMatch): Finding {
-  if (match.kind === 'cc-11-3') {
-    return {
-      id: `cc-11-3-${match.filePath}:${String(match.line)}`,
-      control_id: 'cc-11-3',
-      finding_type: 'likely_issue',
-      evidence_strength: 'medium',
-      reproducibility: 'static',
-      review_action: 'fix_before_launch',
-      blast_radius: 'tenant_data',
-      title: `Direct-object access by id on sensitive table "${match.table ?? '<unknown>'}" without a tenant/user filter`,
-      summary: `${match.filePath}:${String(match.line)} — \`${match.excerpt}\` queries by id on a sensitive table with no .eq('tenant_id' | 'user_id' | 'workspace_id') clause nearby. Any signed-in user appears able to read rows owned by other users. Needs human review. ${UNCERTAINTY_NOTE}.`,
-      evidence_refs: [],
-      suggested_test_ids: [
-        'GET /api/<sensitive>/:id as user_b should return 403',
-      ],
-    };
-  }
-  return {
-    id: `cc-11-4-${match.filePath}:${String(match.line)}`,
-    control_id: 'cc-11-4',
-    finding_type: 'likely_issue',
-    evidence_strength: 'medium',
-    reproducibility: 'static',
-    review_action: 'fix_before_launch',
-    blast_radius: 'tenant_data',
-    title: `Client-provided tenant identifier used in a query without server-side validation`,
-    summary: `${match.filePath}:${String(match.line)} — \`${match.excerpt}\`. The tenant scope is read from URL/search params and used directly in a Supabase query. No detectable server-side check confirms the caller belongs to that tenant. Needs human review. ${UNCERTAINTY_NOTE}.`,
-    evidence_refs: [],
-    suggested_test_ids: [
-      'GET /<page>?tenant_id=<other> as user_a should return 403 or empty',
-    ],
-  };
-}
-
-function coverageGap(): Finding {
-  return {
-    id: 'cc-11-3-coverage-gap-no-supabase-tables',
-    control_id: 'cc-11-3',
+function missingScanFactsCoverageGap(): readonly Finding[] {
+  // Retro-11b f4: emit a coverage_gap per affected control when the
+  // upstream scan-facts artifact is missing. Each predicate gets its
+  // own gap so the report attributes the absence to the right control.
+  const make = (controlId: string): Finding => ({
+    id: `${controlId}-coverage-gap-no-scan-facts`,
+    control_id: controlId,
     finding_type: 'coverage_gap',
     evidence_strength: 'low',
     reproducibility: 'manual_review_required',
     review_action: 'review_before_launch',
     blast_radius: 'tenant_data',
-    title: 'Tenant-isolation checks were not performed (no supabase-tables.json)',
-    summary: `supabase-rls agent did not produce supabase-tables.json, so the sensitive-table list could not be cross-referenced with data-access call sites. Negative tests should be added. ${UNCERTAINTY_NOTE}.`,
+    title: `${controlId} predicate had no facts to evaluate`,
+    summary: `scan-facts.json was not produced for this scan, so the Pass-1 predicate could not evaluate ${controlId}. Negative tests should be added once the artifact is available. ${UNCERTAINTY_NOTE}.`,
     evidence_refs: [],
-  };
+  });
+  return [make('cc-11-3'), make('cc-11-4'), make('cc-11-9')];
 }
 
 export function createAuthzTenantAgent(): VeyraAgent<
@@ -142,22 +85,30 @@ export function createAuthzTenantAgent(): VeyraAgent<
       input: AuthzTenantInput,
       _context: AgentExecutionContext,
     ): Promise<AgentResult<AuthzTenantOutput>> {
-      const files = await walkSources(input.projectRoot);
-      const sensitive = await readSensitiveTableNames(
-        input.supabaseTablesArtifactPath,
-      );
-      const matches = detectAuthzIssues({
-        fileList: files,
-        ...(sensitive !== undefined
-          ? { sensitiveTableNames: sensitive }
-          : {}),
-      });
+      // Back-compat: pre-08b code may still pass scannerFindingsArtifactPath.
+      const factsPath =
+        input.scanFactsArtifactPath ?? input.scannerFindingsArtifactPath;
+      const facts = await readScanFacts(factsPath);
+
+      if (facts === undefined) {
+        const gaps = missingScanFactsCoverageGap();
+        return {
+          status: 'completed',
+          artifacts: [],
+          findings: [...gaps],
+          warnings: [],
+          output: {
+            findingsCount: gaps.length,
+            factsConsumed: 0,
+          },
+        };
+      }
 
       const findings: Finding[] = [];
-      if (input.supabaseTablesArtifactPath === undefined) {
-        findings.push(coverageGap());
-      }
-      for (const m of matches) findings.push(buildFinding(m));
+      findings.push(...predicateDirectObjectAccess(facts));
+      findings.push(...predicateClientTenantId(facts));
+      findings.push(...predicateCrossTenantWriteRisk(facts));
+      findings.push(...authzCoverageGaps(facts));
 
       return {
         status: 'completed',
@@ -166,7 +117,7 @@ export function createAuthzTenantAgent(): VeyraAgent<
         warnings: [],
         output: {
           findingsCount: findings.length,
-          filesScanned: files.length,
+          factsConsumed: facts.length,
         },
       };
     },

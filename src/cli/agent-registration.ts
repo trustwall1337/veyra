@@ -74,9 +74,11 @@ export function registerPhase1Agents(
     scannerFindingsArtifactPath: path.join(context.artifactDir, 'scan-facts.json'),
   }));
 
-  // 5. authz-tenant (Layer 4 Pass-1 predicate).
+  // 5. authz-tenant (Layer 4 Pass-1 predicate). Post retro-11b
+  // consumes scan-facts.json instead of file-walking.
   orch.register(createAuthzTenantAgent(), (context: AgentExecutionContext) => ({
     projectRoot: context.projectRoot,
+    scanFactsArtifactPath: path.join(context.artifactDir, 'scan-facts.json'),
     supabaseTablesArtifactPath: path.join(context.artifactDir, 'supabase-tables.json'),
   }));
 
