@@ -1,6 +1,6 @@
 # Step 17b — Deterministic Bootstrap Inventory (split of step 17)
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §1 layer 1, §7.1, §9 step 17 row`
 **Amends Phase 1 step:** 17
 **Produces:** deterministic module at `src/agents/product-understanding/inventory/`
