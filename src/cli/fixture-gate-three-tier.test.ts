@@ -28,6 +28,7 @@ import {
   AI_CONCERNS_HEADING,
   renderMarkdownReport,
 } from '../reporters/markdown/index.js';
+import { STRINGS as MD_STRINGS } from '../reporters/markdown/strings.js';
 import type { AIConcern } from '../types/ai-concern.js';
 import type { Finding } from '../types/finding.js';
 import type { Hypothesis } from '../types/hypothesis.js';
@@ -118,14 +119,21 @@ describe('gate 1 — three-tier rendering', () => {
       },
     ];
     const md = renderMarkdownReport(baselineReport, { aiConcerns: concerns });
-    expect(md).toContain('## Items that appear launch-blocking');
+    // Retro-19b f2: assert all three required headings explicitly,
+    // including the post-retro-13 standalone Findings tier.
+    expect(md).toContain(MD_STRINGS.HEADING_LAUNCH_BLOCKERS);
+    expect(md).toContain(MD_STRINGS.HEADING_FINDINGS);
     expect(md).toContain(AI_CONCERNS_HEADING);
     expect(md).toContain(ACTIVE_OUTCOMES_HEADING);
-    // AIConcern content must NOT appear under the Findings heading.
-    const findingsHeadingIdx = md.indexOf('## Items that appear');
+    // Tier ordering: Findings precedes AIConcerns precedes Active outcomes.
+    const findingsHeadingIdx = md.indexOf(MD_STRINGS.HEADING_FINDINGS);
     const concernsHeadingIdx = md.indexOf(AI_CONCERNS_HEADING);
+    const activeHeadingIdx = md.indexOf(ACTIVE_OUTCOMES_HEADING);
     expect(findingsHeadingIdx).toBeLessThan(concernsHeadingIdx);
-    const findingsSection = md.slice(findingsHeadingIdx, concernsHeadingIdx);
+    expect(concernsHeadingIdx).toBeLessThan(activeHeadingIdx);
+    // AIConcern content must NOT appear under the Findings heading.
+    const launchBlockersIdx = md.indexOf(MD_STRINGS.HEADING_LAUNCH_BLOCKERS);
+    const findingsSection = md.slice(launchBlockersIdx, concernsHeadingIdx);
     expect(findingsSection).not.toContain('c-1');
   });
 });
@@ -237,6 +245,25 @@ describe('output-language discipline on the rendered report', () => {
   });
 });
 
-// Side-effect: ensure os.tmpdir is reachable (used by other gates via
-// makeTempDir patterns in companion test files).
-void os.tmpdir();
+describe('retro-19b f6: §14 Q8 — --no-ai does not produce missing_evidence findings due to AI absence', () => {
+  it('disposeHypotheses without any hypotheses produces no missing_evidence assertions', () => {
+    // §14 Q8: a deterministic-only run (no AI input) does not produce
+    // `missing_evidence` Findings for controls that would have
+    // benefited from AI. Pass-2 disposition with no hypotheses must
+    // therefore add nothing to the Findings set.
+    const findings: readonly Finding[] = [fixtureFinding('f-1', 'cc-11-5')];
+    const r = disposeHypotheses({ findings, hypotheses: [] });
+    // Disposition emits zero AIConcerns and the original Findings set
+    // unchanged when no hypotheses are supplied.
+    expect(r.aiConcerns).toHaveLength(0);
+    // None of the inputs were `missing_evidence` to begin with, and
+    // disposition does not synthesize them.
+    for (const f of r.findings) {
+      expect(f.finding_type).not.toBe('missing_evidence');
+    }
+  });
+});
+
+// Touch the `os` import so type-stripping doesn't drop it (placeholder
+// for companion fixture-run helpers that materialize temp dirs).
+void os.tmpdir;
