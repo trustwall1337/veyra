@@ -142,6 +142,12 @@ describe('composeReport — ReadinessReport assembly', () => {
       { scanId: 's', generatedAt: '2026-05-25T00:00:00Z' },
     );
     expect(composed.report.control_cards.length).toBe(CONTROLS.length);
+    // Every card carries expected_behavior + evidence_refs per §9.3.
+    for (const card of composed.report.control_cards) {
+      expect(typeof card.expected_behavior).toBe('string');
+      expect(card.expected_behavior.length).toBeGreaterThan(0);
+      expect(Array.isArray(card.evidence_refs)).toBe(true);
+    }
   });
 
   it('launchBlockerCount reflects the count of launch_blocker cards', () => {

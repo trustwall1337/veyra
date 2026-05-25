@@ -158,10 +158,12 @@ function buildControlCard(
   const concerns = aiConcernsForControl(control, aiConcerns, hypothesesById);
   return {
     control_id: control.control_id,
+    expected_behavior: control.expected_behavior,
     title: control.expected_behavior,
     readiness_status: status,
     findings,
     evidence,
+    evidence_refs: evidence.map((e) => e.id),
     suggested_tests: [],
     uncertainty_notes: [],
     ...(supporting.length > 0

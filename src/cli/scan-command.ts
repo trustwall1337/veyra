@@ -577,6 +577,33 @@ export async function runScan(
       );
       if (hasBlocker) exitCode = 1;
     }
+    // Reporter invocation per step 14 Done-when: produce
+    // veyra-report.md (always) and veyra-report.json (if --json).
+    // The evidence-report agent persists readiness-report.json as the
+    // source of truth; we read it back and render user-facing
+    // formats from there. Failure to read/render does not fail the
+    // scan — the artifact is the durable source.
+    const readinessJsonPath = path.join(
+      inputs.projectRoot,
+      '.veyra',
+      'scans',
+      scanId,
+      'readiness-report.json',
+    );
+    try {
+      const text = await fs.readFile(readinessJsonPath, 'utf8');
+      const readinessReport = JSON.parse(text) as import('../types/readiness-report.js').ReadinessReport;
+      const md = await import('../reporters/markdown/index.js');
+      const jr = await import('../reporters/json/index.js');
+      await fs.writeFile(inputs.outPath, md.renderMarkdownReport(readinessReport), 'utf8');
+      if (inputs.jsonPath !== undefined) {
+        await fs.writeFile(inputs.jsonPath, jr.renderJsonReport(readinessReport), 'utf8');
+      }
+    } catch {
+      // No readiness-report.json — evidence-report didn't run or
+      // failed; the orchestrator already recorded that as a warning.
+      // Reporter is a downstream concern.
+    }
   } catch (e) {
     if (e instanceof NotImplementedError) {
       deps.logger.info(

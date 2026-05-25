@@ -26,10 +26,24 @@ export type ReadinessStatus =
 
 export interface ControlCard {
   readonly control_id: string;
+  /** Canonical control description from `controls.ts`. */
+  readonly expected_behavior: string;
+  /**
+   * Display title — defaults to `expected_behavior` but kept separate
+   * so the reporter can override per-control if needed.
+   */
   readonly title: string;
   readonly readiness_status: ReadinessStatus;
   readonly findings: readonly Finding[];
+  /** Full evidence items (heavyweight; persisted in control-cards.json). */
   readonly evidence: readonly EvidenceItem[];
+  /**
+   * Per FPP §9.3: the card's evidence refs in id-only form. Derived
+   * from `evidence` at compose time; kept as a flat string list so
+   * downstream consumers can dedupe / link without walking the full
+   * evidence objects.
+   */
+  readonly evidence_refs: readonly string[];
   readonly suggested_tests: readonly SuggestedTest[];
   readonly uncertainty_notes: readonly string[];
   /**
