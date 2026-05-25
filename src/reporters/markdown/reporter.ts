@@ -5,10 +5,31 @@
  * no network. The reporter owns no agent logic.
  */
 
+import type { AIConcern } from '../../types/ai-concern.js';
 import type { Finding } from '../../types/finding.js';
 import type { ReadinessReport } from '../../types/readiness-report.js';
 
+import { renderActiveOutcomesSection } from './sections/active-outcomes.js';
+import {
+  renderAiConcernsOmittedSection,
+  renderAiConcernsSection,
+  type AiConcernThreshold,
+} from './sections/ai-concerns.js';
 import { STRINGS } from './strings.js';
+
+export interface MarkdownReportOptions {
+  /**
+   * AIConcern entries produced by Pass-2 disposition (revision §11
+   * tier 2). When `undefined`, the report assumes AI was disabled and
+   * renders the omitted-section banner instead.
+   */
+  readonly aiConcerns?: readonly AIConcern[];
+  /**
+   * Minimum AIConcern confidence to render. Default `medium` per
+   * revision §14 Q6.
+   */
+  readonly aiConcernThreshold?: AiConcernThreshold;
+}
 
 function renderFinding(f: Finding): string {
   const parts = [
@@ -76,13 +97,25 @@ function renderControlCards(report: ReadinessReport): string {
   return sections.join('\n').trim();
 }
 
-export function renderMarkdownReport(report: ReadinessReport): string {
+export function renderMarkdownReport(
+  report: ReadinessReport,
+  options: MarkdownReportOptions = {},
+): string {
+  const threshold = options.aiConcernThreshold ?? 'medium';
+  const tier2 =
+    options.aiConcerns === undefined
+      ? renderAiConcernsOmittedSection()
+      : renderAiConcernsSection(options.aiConcerns, threshold);
   const sections: string[] = [
     `# Veyra launch-readiness report`,
     '',
     renderExecutiveSummary(report),
     '',
     renderLaunchBlockers(report),
+    '',
+    tier2,
+    '',
+    renderActiveOutcomesSection(),
     '',
     renderControlCards(report),
     '',

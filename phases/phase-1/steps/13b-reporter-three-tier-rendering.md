@@ -1,6 +1,6 @@
 # Step 13b — Reporter three-tier rendering
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §11`; `PHASE_2_PLAN §11 reduction 4 confirmation`; revision §14 Q6
 **Amends Phase 1 step:** 13
 **Produces:** reporter extension at `src/reporters/markdown/sections/` and `src/reporters/markdown/evidence/`
