@@ -1,6 +1,6 @@
 # Step 17 — Product-understanding agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 5`, §4.1, §3 Step 1
 **Produces:** `src/agents/product-understanding/`
 **Depends on:** 02, 15
