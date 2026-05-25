@@ -1,6 +1,6 @@
 # Step 11 — Authz / tenant-boundary agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 11`, §4.3
 **Produces:** `src/agents/authz-tenant/`
 **Depends on:** 02, 04, 08, 09
