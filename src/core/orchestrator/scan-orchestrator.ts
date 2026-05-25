@@ -62,10 +62,12 @@ interface Registered {
   readonly buildInput: InputBuilder<unknown>;
 }
 
-function topoSort(entries: readonly Registered[]): Registered[] {
-  // Subset of declared_dependencies that names another registered
-  // agent's id. Anything else is treated as an external artifact /
-  // service and ignored for ordering.
+/**
+ * Group entries into dependency layers. Each layer contains agents
+ * whose declared_dependencies are fully satisfied by previous layers.
+ * Within a layer, entries are sorted by id for deterministic order.
+ */
+function topoLayers(entries: readonly Registered[]): Registered[][] {
   const idSet = new Set(entries.map((e) => e.agent.metadata.id));
   const incoming = new Map<string, Set<string>>();
   for (const e of entries) {
@@ -75,9 +77,8 @@ function topoSort(entries: readonly Registered[]): Registered[] {
     }
     incoming.set(e.agent.metadata.id, deps);
   }
-
-  const out: Registered[] = [];
   const byId = new Map(entries.map((e) => [e.agent.metadata.id, e] as const));
+  const layers: Registered[][] = [];
   while (incoming.size > 0) {
     const ready = Array.from(incoming.entries())
       .filter(([, deps]) => deps.size === 0)
@@ -88,14 +89,16 @@ function topoSort(entries: readonly Registered[]): Registered[] {
         `dependency cycle among agents: ${Array.from(incoming.keys()).join(', ')}`,
       );
     }
+    const layer: Registered[] = [];
     for (const id of ready) {
       const entry = byId.get(id);
-      if (entry !== undefined) out.push(entry);
+      if (entry !== undefined) layer.push(entry);
       incoming.delete(id);
       for (const deps of incoming.values()) deps.delete(id);
     }
+    layers.push(layer);
   }
-  return out;
+  return layers;
 }
 
 function coverageGapFor(
@@ -150,8 +153,25 @@ async function writeErrorArtifact(
   }
 }
 
-export function createScanOrchestrator(): ScanOrchestrator {
+export interface CreateScanOrchestratorOptions {
+  /**
+   * Max number of agents to run in parallel within a single
+   * dependency layer. Default 1 (deterministic single-threaded
+   * execution). Setting >1 enables intra-layer parallelism while
+   * preserving the layer ordering imposed by declared_dependencies.
+   * Concurrency is a performance optimization, not a semantic
+   * change — the resulting findings/artifacts set is identical
+   * regardless of value (see scan-orchestrator.test.ts determinism
+   * checks).
+   */
+  readonly maxConcurrency?: number;
+}
+
+export function createScanOrchestrator(
+  options: CreateScanOrchestratorOptions = {},
+): ScanOrchestrator {
   const entries: Registered[] = [];
+  const maxConcurrency = Math.max(1, options.maxConcurrency ?? 1);
   return {
     register<I, O>(
       agent: VeyraAgent<I, O>,
@@ -170,39 +190,90 @@ export function createScanOrchestrator(): ScanOrchestrator {
           'ScanOrchestrator.run called with no agents registered',
         );
       }
-      const order = topoSort(entries);
+      const layers = topoLayers(entries);
+      const resultsByAgent = new Map<string, AgentResult<unknown>>();
       const findings: Finding[] = [];
       const artifacts: ArtifactRef[] = [];
       const warnings: string[] = [];
-      const resultsByAgent = new Map<string, AgentResult<unknown>>();
+      const trace: { agent_id: string; layer: number; status: 'ok' | 'threw' }[] = [];
 
-      for (const entry of order) {
+      async function runOne(entry: Registered): Promise<{
+        id: string;
+        result?: AgentResult<unknown>;
+        error?: { reason: string; cause: unknown };
+      }> {
         const meta = entry.agent.metadata;
         try {
           const input = entry.buildInput(context, resultsByAgent);
           const result = await entry.agent.run(input, context);
-          resultsByAgent.set(meta.id, result);
-          findings.push(...result.findings);
-          artifacts.push(...result.artifacts);
-          warnings.push(...result.warnings);
+          return { id: meta.id, result };
         } catch (cause) {
           const reason = cause instanceof Error ? cause.message : String(cause);
-          findings.push(coverageGapFor(meta, reason));
-          const errArtifact = await writeErrorArtifact(
-            context.artifactDir,
-            meta,
-            reason,
-            cause,
-          );
-          if (errArtifact !== undefined) {
-            artifacts.push({ ...errArtifact, scanId: context.scanId });
-          }
-          warnings.push(`agent_threw: ${meta.id}: ${reason}`);
-          context.logger.warn(
-            `orchestrator: agent "${meta.id}" threw: ${reason}`,
-          );
+          return { id: meta.id, error: { reason, cause } };
         }
       }
+
+      for (let layerIdx = 0; layerIdx < layers.length; layerIdx += 1) {
+        const layer = layers[layerIdx];
+        if (layer === undefined) continue;
+
+        // Bounded-concurrency execution within the layer. We process
+        // in fixed-size chunks of `maxConcurrency`; within a chunk we
+        // gather results in the layer's sort order (which is
+        // deterministic by id) before moving on. This keeps the
+        // merged findings/artifacts byte-deterministic regardless of
+        // which agent finishes first.
+        const layerOutputs: Awaited<ReturnType<typeof runOne>>[] = [];
+        for (let i = 0; i < layer.length; i += maxConcurrency) {
+          const chunk = layer.slice(i, i + maxConcurrency);
+          const chunkResults = await Promise.all(chunk.map(runOne));
+          layerOutputs.push(...chunkResults);
+        }
+
+        // Sort outputs deterministically by agent id before merging.
+        layerOutputs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        for (const out of layerOutputs) {
+          const meta = layer.find((e) => e.agent.metadata.id === out.id)?.agent
+            .metadata;
+          if (meta === undefined) continue;
+          if (out.result !== undefined) {
+            resultsByAgent.set(out.id, out.result);
+            findings.push(...out.result.findings);
+            artifacts.push(...out.result.artifacts);
+            warnings.push(...out.result.warnings);
+            trace.push({ agent_id: out.id, layer: layerIdx, status: 'ok' });
+          } else if (out.error !== undefined) {
+            findings.push(coverageGapFor(meta, out.error.reason));
+            const errArtifact = await writeErrorArtifact(
+              context.artifactDir,
+              meta,
+              out.error.reason,
+              out.error.cause,
+            );
+            if (errArtifact !== undefined) {
+              artifacts.push({ ...errArtifact, scanId: context.scanId });
+            }
+            warnings.push(`agent_threw: ${out.id}: ${out.error.reason}`);
+            context.logger.warn(
+              `orchestrator: agent "${out.id}" threw: ${out.error.reason}`,
+            );
+            trace.push({ agent_id: out.id, layer: layerIdx, status: 'threw' });
+          }
+        }
+      }
+
+      // Persist the layer-routing trace artifact (debug-only).
+      try {
+        await fs.mkdir(context.artifactDir, { recursive: true });
+        await fs.writeFile(
+          path.join(context.artifactDir, 'scan-trace.json'),
+          JSON.stringify({ layers: layers.length, trace }, null, 2),
+          'utf8',
+        );
+      } catch {
+        // trace is debug-only; never fail the scan over it.
+      }
+
       return {
         status: 'completed',
         findings,

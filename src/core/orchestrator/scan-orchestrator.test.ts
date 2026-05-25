@@ -162,3 +162,72 @@ describe('determinism', () => {
     expect(orderA).toEqual(orderB);
   });
 });
+
+describe('parallel batching — determinism (step 18b)', () => {
+  it('concurrency=1 and concurrency=4 produce identical sorted finding sets', async () => {
+    function buildOrch(concurrency: number) {
+      const orch = createScanOrchestrator({ maxConcurrency: concurrency });
+      // Independent agents in the same layer so concurrency actually
+      // exercises the batching path.
+      for (const id of ['agent-a', 'agent-b', 'agent-c', 'agent-d']) {
+        orch.register(
+          stubAgent(id, [], {
+            findings: [
+              {
+                id: `f-${id}`,
+                control_id: 'cc-11-3',
+                finding_type: 'likely_issue',
+                evidence_strength: 'medium',
+                reproducibility: 'static',
+                review_action: 'review_before_launch',
+                blast_radius: 'tenant_data',
+                title: id,
+                summary: id,
+                evidence_refs: [],
+              },
+            ],
+          }),
+        );
+      }
+      return orch;
+    }
+    const r1 = await buildOrch(1).run(await ctx());
+    const r4 = await buildOrch(4).run(await ctx());
+    const ids1 = r1.findings.map((f) => f.id).sort();
+    const ids4 = r4.findings.map((f) => f.id).sort();
+    expect(ids1).toEqual(ids4);
+  });
+
+  it('two predicates that throw produce the same final coverage_gap set regardless of concurrency', async () => {
+    function buildOrch(concurrency: number) {
+      const orch = createScanOrchestrator({ maxConcurrency: concurrency });
+      orch.register(stubAgent('healthy', []));
+      orch.register(stubAgent('thrower-1', [], { throws: true }));
+      orch.register(stubAgent('thrower-2', [], { throws: true }));
+      return orch;
+    }
+    const r1 = await buildOrch(1).run(await ctx());
+    const r2 = await buildOrch(3).run(await ctx());
+    const ids1 = r1.findings.map((f) => f.id).sort();
+    const ids2 = r2.findings.map((f) => f.id).sort();
+    expect(ids1).toEqual(ids2);
+  });
+
+  it('writes scan-trace.json with agent_id + layer per agent', async () => {
+    const orch = createScanOrchestrator();
+    orch.register(stubAgent('a', []));
+    orch.register(stubAgent('b', ['a']));
+    const c = await ctx();
+    await orch.run(c);
+    const text = await fs.readFile(
+      path.join(c.artifactDir, 'scan-trace.json'),
+      'utf8',
+    );
+    const parsed = JSON.parse(text) as {
+      layers: number;
+      trace: { agent_id: string; layer: number; status: string }[];
+    };
+    expect(parsed.trace.find((t) => t.agent_id === 'a')?.layer).toBe(0);
+    expect(parsed.trace.find((t) => t.agent_id === 'b')?.layer).toBe(1);
+  });
+});

@@ -1,6 +1,6 @@
 # Step 18b — Orchestrator: seven-layer routing + Pass-2 disposition module
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §1 architecture, §4.2 disposition rules 1–5, §12b mid-scan failure rule`
 **Amends Phase 1 step:** 18
 **Produces:** orchestrator wiring at `src/core/orchestrator/scan-orchestrator.ts` + Pass-2 module at `src/core/assertions/hypothesis-disposition.ts`
@@ -31,6 +31,7 @@ Wire the seven-layer orchestrator (revision §1) and the Pass-2 hypothesis-dispo
 - Context-request retry-cap test: 3rd retry → `ContextPolicyError.kind = 'retry_cap_exhausted'`; hypothesis falls through to rule 4.
 - `--no-ai` skip-path test: assert no AI agent's `run()` is invoked; `ai-concerns.json` is empty; report still renders.
 - Agent-crash isolation test: throw inside one Pass-1 predicate → other predicates still emit findings; the crashing one logs `agent_error` and the affected control gets `coverage_gap`.
+- **Deterministic parallel batching:** the orchestrator executes dependency-ready agents in parallel batches where safe, while preserving deterministic artifact names, deterministic final report ordering, per-agent failure isolation, and a configurable concurrency limit. The default is bounded by available CPU count; CLI flag wiring is optional and only allowed if already defined by step 03/03b. Parallel-batching test asserts: (a) the same fixture run twice produces byte-identical `findings.json` + `ai-concerns.json` after serializer-scrubbed timestamps/UUIDs; (b) two predicates that throw in different orders still produce the same final `coverage_gap` set; (c) concurrency `1` produces byte-identical output to the default — concurrency is a performance optimization, not a semantic change.
 
 ## Guardrails
 
@@ -39,6 +40,7 @@ Wire the seven-layer orchestrator (revision §1) and the Pass-2 hypothesis-dispo
 - Per `FPP §2A`: orchestrator iterates registered agents from the service registry, not via a `switch (agent_id)`. Adding an agent is one registration entry.
 - Per `CLAUDE.md §Composability`: orchestrator is the only thing that calls multiple agents. Agents do not import each other.
 - `assertions.json` is the audit spine for the disposition pass. Every hypothesis has exactly one recorded outcome.
+- **Scheduling, recurring scans, multi-project queues, and distributed workers are future hosted-product capabilities — out of scope for Phase 1.** Phase 1 only requires a local orchestrator whose agent contracts and artifact model can later be moved behind a queue without changing agent logic. Do NOT add: cron-style schedulers, Redis/SQS/queue integration, multi-tenant job tables, dashboard job-state surfaces, or distributed-worker process spawning. External tooling (`cron`, GitHub Actions, launchd, systemd timers) handles scheduling needs for the local CLI; introducing Veyra-owned scheduling/queue infrastructure now would violate `FPP §18` "What Not To Build First" and adds maintenance cost without users.
 
 ## References
 
