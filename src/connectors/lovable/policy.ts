@@ -59,6 +59,13 @@ export function checkToolAllowed(
   return ok(undefined);
 }
 
+// Retro-15 f3 + f4: strictly bound send_message inputs. Only the three
+// explicit fields are permitted; any other top-level field is a
+// caller attempting to smuggle free-form text past the template gate.
+// Phase 1's four templates carry no slots, so slots is rejected unless
+// a future template registers slot keys.
+const SEND_MESSAGE_ALLOWED_KEYS = new Set(['template_id', 'plan_mode', 'slots']);
+
 export function checkSendMessageArgs(
   args: unknown,
 ): Result<SendMessageArgs, PolicyViolationError> {
@@ -72,6 +79,19 @@ export function checkSendMessageArgs(
     );
   }
   const a = args as Record<string, unknown>;
+  // Retro-15 f3: reject any field outside the explicit allowed set.
+  // This blocks `message`, `prompt`, or other free-form text smuggling.
+  for (const k of Object.keys(a)) {
+    if (!SEND_MESSAGE_ALLOWED_KEYS.has(k)) {
+      return err(
+        new PolicyViolationError(
+          `send_message rejected: unknown field "${k}"; only template_id + plan_mode (+ optional slots) are accepted`,
+          'read_code',
+          LOVABLE_CONNECTOR_ID as string,
+        ),
+      );
+    }
+  }
   if (a['plan_mode'] !== true) {
     return err(
       new PolicyViolationError(
@@ -99,13 +119,21 @@ export function checkSendMessageArgs(
       ),
     );
   }
-  const slots = a['slots'];
+  // Retro-15 f4: slots are rejected for Phase 1. The four allowed
+  // templates do not take slots. A future template adding slots must
+  // declare its allowed slot keys + value schema and validate here.
+  if (a['slots'] !== undefined) {
+    return err(
+      new PolicyViolationError(
+        'send_message: slots are not accepted in Phase 1 (no template registers slot keys)',
+        'read_code',
+        LOVABLE_CONNECTOR_ID as string,
+      ),
+    );
+  }
   return ok({
     template_id: a['template_id'],
     plan_mode: true,
-    ...(typeof slots === 'object' && slots !== null
-      ? { slots: slots as Readonly<Record<string, string>> }
-      : {}),
   });
 }
 

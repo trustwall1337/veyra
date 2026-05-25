@@ -12,9 +12,10 @@
  * Production wiring lands when CLI integration is finalised.
  */
 
+import { redactSecrets } from '../../ai/sanitization.js';
 import { PolicyViolationError } from '../../types/errors.js';
 import type { PromptTemplateId } from '../../types/prompt-template.js';
-import { type Result, ok } from '../../types/result.js';
+import { type Result, err, ok } from '../../types/result.js';
 
 import { canonicalTextFor } from './prompt-templates.js';
 import {
@@ -23,6 +24,38 @@ import {
   checkToolAllowed,
   type SendMessageArgs,
 } from './policy.js';
+
+export class LovableTransportError extends Error {
+  override readonly name = 'LovableTransportError';
+  constructor(
+    message: string,
+    public override readonly cause?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+export type LovableClientError = PolicyViolationError | LovableTransportError;
+
+/**
+ * Retro-15 f5: response redaction. Walks the response object/array
+ * tree and runs redactSecrets on every string leaf. Preserves the
+ * object shape so downstream consumers (product-understanding,
+ * supabase-rls) see the same structure they would have seen, minus
+ * raw secrets.
+ */
+function redactResponse(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value) as string;
+  if (Array.isArray(value)) return value.map(redactResponse);
+  if (typeof value === 'object' && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactResponse(v);
+    }
+    return out;
+  }
+  return value;
+}
 
 export interface LovableTransport {
   invokeTool(name: string, args: Readonly<Record<string, unknown>>): Promise<unknown>;
@@ -53,53 +86,60 @@ export class LovableClient {
   async invoke(
     tool: string,
     args: Readonly<Record<string, unknown>>,
-  ): Promise<Result<unknown, PolicyViolationError>> {
+  ): Promise<Result<unknown, LovableClientError>> {
     const allowed = checkToolAllowed(tool);
     if (!allowed.ok) return allowed;
-    if (tool === 'send_message') {
-      const checked = checkSendMessageArgs(args);
-      if (!checked.ok) return checked;
-      return ok(
-        await this.#transport.invokeTool('send_message', {
+    let raw: unknown;
+    try {
+      if (tool === 'send_message') {
+        const checked = checkSendMessageArgs(args);
+        if (!checked.ok) return checked;
+        raw = await this.#transport.invokeTool('send_message', {
           project_id: this.#projectId,
           template_id: checked.value.template_id,
           message: canonicalTextFor(checked.value.template_id as PromptTemplateId) ?? '',
           plan_mode: true,
-          ...(checked.value.slots !== undefined
-            ? { slots: checked.value.slots }
-            : {}),
-        }),
-      );
+        });
+      } else {
+        raw = await this.#transport.invokeTool(tool, {
+          project_id: this.#projectId,
+          ...args,
+        });
+      }
+    } catch (cause) {
+      // Retro-15 f7: transport exceptions become typed errors so the
+      // Result-returning contract isn't broken by an upstream throw.
+      const m = cause instanceof Error ? cause.message : String(cause);
+      return err(new LovableTransportError(`Lovable transport failed for "${tool}": ${m}`, cause));
     }
-    return ok(
-      await this.#transport.invokeTool(tool, { project_id: this.#projectId, ...args }),
-    );
+    // Retro-15 f5: redact response leaves before returning.
+    return ok(redactResponse(raw));
   }
 
   // Convenience typed shims. These wrap `invoke` with named args.
-  getProject(): Promise<Result<unknown, PolicyViolationError>> {
+  getProject(): Promise<Result<unknown, LovableClientError>> {
     return this.invoke('get_project', {});
   }
 
-  listFiles(): Promise<Result<unknown, PolicyViolationError>> {
+  listFiles(): Promise<Result<unknown, LovableClientError>> {
     return this.invoke('list_files', {});
   }
 
-  readFile(filePath: string): Promise<Result<unknown, PolicyViolationError>> {
+  readFile(filePath: string): Promise<Result<unknown, LovableClientError>> {
     return this.invoke('read_file', { path: filePath });
   }
 
-  listEdits(): Promise<Result<unknown, PolicyViolationError>> {
+  listEdits(): Promise<Result<unknown, LovableClientError>> {
     return this.invoke('list_edits', {});
   }
 
-  getDiff(editId: string): Promise<Result<unknown, PolicyViolationError>> {
+  getDiff(editId: string): Promise<Result<unknown, LovableClientError>> {
     return this.invoke('get_diff', { edit_id: editId });
   }
 
   sendMessage(
     args: SendMessageArgs,
-  ): Promise<Result<unknown, PolicyViolationError>> {
+  ): Promise<Result<unknown, LovableClientError>> {
     return this.invoke('send_message', args as unknown as Readonly<Record<string, unknown>>);
   }
 }

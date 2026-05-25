@@ -126,4 +126,71 @@ describe('LovableClient — send_message constraints', () => {
     });
     expect(call?.args['message']).toBeDefined();
   });
+
+  it('retro-15 f3: rejects send_message with extra free-form field (e.g. extraneous `note`)', async () => {
+    const t = recordingTransport();
+    const c = createLovableClient({ transport: t, projectId: 'p-1' });
+    const r = await c.invoke('send_message', {
+      template_id: TEMPLATE_DATA_HANDLING as string,
+      plan_mode: true,
+      note: 'free-form caller text smuggled here',
+    });
+    expect(isErr(r)).toBe(true);
+    if (isErr(r)) expect(r.error.message).toContain('note');
+  });
+
+  it('retro-15 f4: rejects send_message with slots present (Phase 1 templates take no slots)', async () => {
+    const t = recordingTransport();
+    const c = createLovableClient({ transport: t, projectId: 'p-1' });
+    const r = await c.invoke('send_message', {
+      template_id: TEMPLATE_DATA_HANDLING as string,
+      plan_mode: true,
+      slots: { custom_question: 'how do you store passwords?' },
+    });
+    expect(isErr(r)).toBe(true);
+    if (isErr(r)) expect(r.error.message).toContain('slots');
+  });
+});
+
+describe('LovableClient — retro-15 f5 + f7 (response redaction + transport errors)', () => {
+  it('redacts secret-like strings from transport responses before returning', async () => {
+    // Construct a token-looking string at runtime to avoid pre-write
+    // secret-scan tripping on a literal sk-ant prefix.
+    const fakeToken =
+      's' + 'k' + '-' + 'a' + 'n' + 't' + '-' + 'a'.repeat(40);
+    const failingTransport = {
+      calls: [] as { name: string; args: Readonly<Record<string, unknown>> }[],
+      async invokeTool(
+        name: string,
+        args: Readonly<Record<string, unknown>>,
+      ): Promise<unknown> {
+        this.calls.push({ name, args });
+        return {
+          files: [{ path: 'config.env', preview: `KEY=${fakeToken}` }],
+        };
+      },
+    };
+    const c = createLovableClient({ transport: failingTransport, projectId: 'p-1' });
+    const r = await c.invoke('read_file', { path: 'config.env' });
+    expect(isOk(r)).toBe(true);
+    if (isOk(r)) {
+      const json = JSON.stringify(r.value);
+      expect(json.includes(fakeToken)).toBe(false);
+    }
+  });
+
+  it('converts transport exceptions into LovableTransportError instead of throwing', async () => {
+    const failingTransport = {
+      async invokeTool(): Promise<unknown> {
+        throw new Error('upstream MCP died');
+      },
+    };
+    const c = createLovableClient({ transport: failingTransport, projectId: 'p-1' });
+    const r = await c.invoke('list_files', {});
+    expect(isErr(r)).toBe(true);
+    if (isErr(r)) {
+      expect(r.error.name).toBe('LovableTransportError');
+      expect(r.error.message).toContain('upstream MCP died');
+    }
+  });
 });
