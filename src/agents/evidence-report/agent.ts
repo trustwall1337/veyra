@@ -19,6 +19,7 @@ import type {
   AgentResult,
   VeyraAgent,
 } from '../../types/agent.js';
+import type { AIConcern } from '../../types/ai-concern.js';
 import type { ArtifactRef } from '../../types/artifact.js';
 import type {
   ControlCard,
@@ -26,6 +27,7 @@ import type {
 } from '../../types/control-card.js';
 import type { EvidenceItem } from '../../types/evidence.js';
 import type { Finding } from '../../types/finding.js';
+import type { Hypothesis, HypothesisRef } from '../../types/hypothesis.js';
 import type {
   ReadinessReport,
   ReadinessSummary,
@@ -50,6 +52,21 @@ export interface EvidenceReportInput {
   readonly evidenceByControl?: Readonly<
     Record<string, readonly EvidenceItem[]>
   >;
+  /**
+   * Hypotheses produced by AI Inference (08d). Attached to control
+   * cards in Pass-2 (revision §4.2 rule 1): when a hypothesis's
+   * `proposed_control_id` matches a control that has at least one
+   * Finding, the hypothesis is recorded as a supporting hypothesis on
+   * the card. Never affects classification or readiness.
+   */
+  readonly hypotheses?: readonly Hypothesis[];
+  /**
+   * AIConcerns produced by Pass-2 disposition (revision §11). The
+   * three-tier reporter renders these under "AI-suggested areas for
+   * human review" — never mixed with Findings. AIConcerns never
+   * affect `readiness_status` (constraints 1, 9).
+   */
+  readonly aiConcerns?: readonly AIConcern[];
 }
 
 export interface EvidenceReportOutput {
@@ -68,12 +85,59 @@ function findingsForControl(
   return findings.filter((f) => f.control_id === control.control_id);
 }
 
+function hypothesesForControl(
+  control: ControlDefinition,
+  findings: readonly Finding[],
+  hypotheses: readonly Hypothesis[],
+): readonly HypothesisRef[] {
+  if (findings.length === 0) return [];
+  // Pass-2 rule 1 (revision §4.2): hypothesis attaches when its
+  // proposed_control_id matches a Finding's control_id AND the
+  // hypothesis's evidence_refs are a subset of the Finding's
+  // evidence_refs. For Phase 1 we apply the looser proposed_control_id
+  // match; 18b's orchestrator can tighten the subset check when the
+  // assertions audit lands.
+  const factSet = new Set<string>(findings.flatMap((f) => f.evidence_refs));
+  const attached: HypothesisRef[] = [];
+  for (const h of hypotheses) {
+    if (h.proposed_control_id !== control.control_id) continue;
+    const refs = h.evidence_refs.map((r) => r.fact_id);
+    const allSubset = refs.every((r) => factSet.has(r));
+    // Allow attachment when there are no fact refs to compare against
+    // (hypothesis cites evidence not in this control's finding set);
+    // 18b will narrow as the orchestrator fills the assertions audit.
+    if (refs.length === 0 || allSubset) {
+      attached.push({ hypothesis_id: h.hypothesis_id });
+    }
+  }
+  return attached;
+}
+
+function aiConcernsForControl(
+  control: ControlDefinition,
+  aiConcerns: readonly AIConcern[],
+  hypothesesById: ReadonlyMap<string, Hypothesis>,
+): readonly AIConcern[] {
+  return aiConcerns.filter((c) => {
+    const hyp = hypothesesById.get(c.originating_hypothesis_id);
+    return hyp?.proposed_control_id === control.control_id;
+  });
+}
+
 function buildControlCard(
   control: ControlDefinition,
   findings: readonly Finding[],
   evidence: readonly EvidenceItem[],
+  hypotheses: readonly Hypothesis[],
+  aiConcerns: readonly AIConcern[],
+  hypothesesById: ReadonlyMap<string, Hypothesis>,
 ): ControlCard {
+  // Readiness rule remains deterministic: only Findings + Evidence
+  // drive it. AIConcerns are advisory; supporting_hypothesis_refs are
+  // attached after the status is computed.
   const status: ReadinessStatus = computeReadiness({ findings, evidence });
+  const supporting = hypothesesForControl(control, findings, hypotheses);
+  const concerns = aiConcernsForControl(control, aiConcerns, hypothesesById);
   return {
     control_id: control.control_id,
     title: control.expected_behavior,
@@ -82,6 +146,12 @@ function buildControlCard(
     evidence,
     suggested_tests: [],
     uncertainty_notes: [],
+    ...(supporting.length > 0
+      ? { supporting_hypothesis_refs: supporting }
+      : {}),
+    ...(concerns.length > 0
+      ? { ai_concerns_for_this_control: concerns }
+      : {}),
   };
 }
 
@@ -106,11 +176,17 @@ export function composeReport(
   input: EvidenceReportInput,
   context: { readonly scanId: string; readonly generatedAt: string },
 ): EvidenceReportOutput {
+  const hypotheses = input.hypotheses ?? [];
+  const aiConcerns = input.aiConcerns ?? [];
+  const hypothesesById = new Map(hypotheses.map((h) => [h.hypothesis_id, h]));
   const cards = CONTROLS.map((control) =>
     buildControlCard(
       control,
       findingsForControl(control, input.findings),
       input.evidenceByControl?.[control.control_id] ?? [],
+      hypotheses,
+      aiConcerns,
+      hypothesesById,
     ),
   );
   const summary = summarize(cards);

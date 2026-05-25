@@ -189,3 +189,104 @@ describe('evidenceReportAgent — artifact emission', () => {
     expect(r.findings).toEqual([]);
   });
 });
+
+describe('composeReport — 14b Pass-2 hypothesis + AIConcern fields', () => {
+  it('attaches a hypothesis to a control card when proposed_control_id matches a Finding', () => {
+    const composed = composeReport(
+      {
+        findings: [
+          finding({
+            control_id: 'cc-11-5',
+            finding_type: 'likely_issue',
+            evidence_strength: 'high',
+            review_action: 'fix_before_launch',
+            evidence_refs: ['fact-1'],
+          }),
+        ],
+        hypotheses: [
+          {
+            hypothesis_id: 'hyp-1',
+            source: 'ai_inference',
+            proposed_control_id: 'cc-11-5',
+            evidence_refs: [{ fact_id: 'fact-1' }],
+            reasoning: 'r',
+            confidence: 'medium',
+            uncertainty_notes: 'n',
+            model_id: 'm',
+            prompt_fingerprint_sha256: '0'.repeat(64),
+          },
+        ],
+      },
+      { scanId: 's', generatedAt: '2026-05-25T00:00:00Z' },
+    );
+    const card = composed.report.control_cards.find(
+      (c) => c.control_id === 'cc-11-5',
+    );
+    expect(card?.supporting_hypothesis_refs?.[0]?.hypothesis_id).toBe('hyp-1');
+  });
+
+  it('AIConcerns are listed on the control card by originating_hypothesis_id → proposed_control_id, never affecting readiness_status', () => {
+    const composed = composeReport(
+      {
+        findings: [],
+        hypotheses: [
+          {
+            hypothesis_id: 'hyp-2',
+            source: 'ai_inference',
+            proposed_control_id: 'cc-11-3',
+            evidence_refs: [{ fact_id: 'fact-x' }],
+            reasoning: 'r',
+            confidence: 'low',
+            uncertainty_notes: 'n',
+            model_id: 'm',
+            prompt_fingerprint_sha256: '0'.repeat(64),
+          },
+        ],
+        aiConcerns: [
+          {
+            concern_id: 'c-1',
+            originating_hypothesis_id: 'hyp-2',
+            category: 'no_predicate_fired',
+            reasoning: 'r',
+            confidence: 'low',
+            evidence_refs: [{ fact_id: 'fact-x' }],
+            uncertainty_notes: 'n',
+            suggested_human_review: 'review manually',
+            model_id: 'm',
+          },
+        ],
+      },
+      { scanId: 's', generatedAt: '2026-05-25T00:00:00Z' },
+    );
+    const card = composed.report.control_cards.find(
+      (c) => c.control_id === 'cc-11-3',
+    );
+    expect(card?.ai_concerns_for_this_control?.length).toBe(1);
+    // AIConcerns never block: with no Findings on cc-11-3, readiness
+    // must NOT be launch_blocker on account of the AIConcern.
+    expect(card?.readiness_status).not.toBe('launch_blocker');
+  });
+
+  it('--fail-on-blocker count is driven by Findings only; AIConcerns do not contribute', () => {
+    const composed = composeReport(
+      {
+        findings: [],
+        aiConcerns: [
+          {
+            concern_id: 'c-only',
+            originating_hypothesis_id: 'hyp-x',
+            category: 'no_predicate_fired',
+            reasoning: 'r',
+            confidence: 'high',
+            evidence_refs: [],
+            uncertainty_notes: 'n',
+            suggested_human_review: '',
+            model_id: 'm',
+          },
+        ],
+      },
+      { scanId: 's', generatedAt: '2026-05-25T00:00:00Z' },
+    );
+    expect(composed.launchBlockerCount).toBe(0);
+  });
+});

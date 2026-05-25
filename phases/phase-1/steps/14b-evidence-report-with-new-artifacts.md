@@ -1,6 +1,6 @@
 # Step 14b — evidence-report agent composes new artifact set
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §10 step 14 row`
 **Amends Phase 1 step:** 14
 **Produces:** agent reshape at `src/agents/evidence-report/`
