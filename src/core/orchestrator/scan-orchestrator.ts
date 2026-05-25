@@ -162,22 +162,41 @@ async function writeErrorArtifact(
 ): Promise<ArtifactRef | undefined> {
   try {
     await fs.mkdir(artifactDir, { recursive: true });
-    const filePath = path.join(artifactDir, `agent-${metadata.id}.error.json`);
-    await fs.writeFile(
-      filePath,
-      JSON.stringify(
-        {
-          agent_id: metadata.id,
-          agent_version: metadata.version,
-          reason,
-          stack: cause instanceof Error ? cause.stack : undefined,
-          recorded_at: new Date().toISOString(),
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    );
+    // Append-only safety per §4.0 artifact-store guardrail: refuse to
+    // overwrite an existing error artifact for the same agent. If one
+    // already exists for this scan-id, append a discriminator.
+    const base = `agent-${metadata.id}.error.json`;
+    let filePath = path.join(artifactDir, base);
+    let suffix = 1;
+    // Use exclusive-creation semantics via writeFile + flag='wx'.
+    while (true) {
+      try {
+        await fs.writeFile(
+          filePath,
+          JSON.stringify(
+            {
+              agent_id: metadata.id,
+              agent_version: metadata.version,
+              reason,
+              stack: cause instanceof Error ? cause.stack : undefined,
+              recorded_at: new Date().toISOString(),
+            },
+            null,
+            2,
+          ),
+          { encoding: 'utf8', flag: 'wx' },
+        );
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST') throw e;
+        suffix += 1;
+        filePath = path.join(
+          artifactDir,
+          `agent-${metadata.id}.error.${String(suffix)}.json`,
+        );
+      }
+    }
     return {
       scanId: 'unknown',
       kind: 'evidence_inventory',

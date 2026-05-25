@@ -559,8 +559,24 @@ export async function runScan(
   };
 
   const orchestrator = deps.orchestratorFactory();
+  let exitCode = 0;
   try {
-    await orchestrator.run(context);
+    const result = await orchestrator.run(context);
+    // --fail-on-blocker wiring per step 18 Done-when: non-zero exit
+    // when any control card reads `launch_blocker`. We approximate via
+    // a finding-level check: any confirmed_issue + fix_before_launch,
+    // or any likely_issue with high evidence_strength + fix_before_launch.
+    if (inputs.failOnBlocker) {
+      const hasBlocker = result.findings.some(
+        (f) =>
+          (f.finding_type === 'confirmed_issue' &&
+            f.review_action === 'fix_before_launch') ||
+          (f.finding_type === 'likely_issue' &&
+            f.evidence_strength === 'high' &&
+            f.review_action === 'fix_before_launch'),
+      );
+      if (hasBlocker) exitCode = 1;
+    }
   } catch (e) {
     if (e instanceof NotImplementedError) {
       deps.logger.info(
@@ -571,7 +587,7 @@ export async function runScan(
     }
   }
 
-  return ok({ exitCode: 0 });
+  return ok({ exitCode });
 }
 
 export function buildScanCommand(deps: ScanCommandDeps): Command {
