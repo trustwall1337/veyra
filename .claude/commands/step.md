@@ -116,11 +116,13 @@ The §4.5 plan review and the §6.5 diff review share the **same codex session**
 ```bash
 codex --version 2>/dev/null
 codex --help 2>/dev/null
-codex session --help 2>/dev/null     # may not exist
-codex review --help 2>/dev/null      # may not exist
+codex exec --help 2>/dev/null
+codex resume --help 2>/dev/null
+codex review --help 2>/dev/null
+codex fork --help 2>/dev/null
 ```
 
-Document the verified subcommands and flag shapes in `.claude/codex-cli.json` (created on first run; persists across sessions until codex updates). This file is the source of truth for "what invocation actually works on this machine." Speculative invocations are **placeholders only** until a successful first-run probe confirms them.
+Document the verified subcommands and flag shapes in `.claude/codex-cli.json` (created on first run; persists across sessions until codex updates). The actual local CLI (verified against this skill) supports `codex exec`, `codex exec resume`, `codex review`, `codex fork`. **There is no `codex session` subcommand on this CLI**; session reuse goes through `codex exec resume <session_id>`. If a future codex update changes the subcommand surface, re-run this probe and update `.claude/codex-cli.json` before the next `/step` call.
 
 #### Step 2 — Build the project context bundle
 
@@ -148,14 +150,32 @@ Session token + bundle hash live in `.claude/codex-session-veyra.json`:
 
 Reuse the existing session if `bundle_sha256` matches the freshly-computed bundle hash AND the codex version on disk matches. Otherwise: invalidate, re-warm, store a new token.
 
-**Speculative invocation** (replace once `.claude/codex-cli.json` confirms the real flags):
+**Verified invocation** (against `codex exec` / `codex exec resume` as confirmed by the local CLI probe; recorded in `.claude/codex-cli.json` `verified_subcommands: ["exec", "exec resume", "review", "fork"]`):
 
 ```bash
-# PLACEHOLDER — verified against .claude/codex-cli.json before use
-codex session new < context-bundle.md  # or whatever the verified CLI is
+# Warm the session: codex inspects the repo in read-only sandbox and ingests the bundle via stdin.
+# --json emits JSONL so we can parse the session_id; -o writes the response transcript for audit.
+codex exec -C "$REPO_ROOT" -s read-only --json \
+  -o .claude/review-runs/<run-id>/codex-warm.jsonl - \
+  < .claude/review-runs/<run-id>/context-bundle.md
+
+# Parse the session_id from the JSONL response (codex exec emits one event with session_id).
+session_id="$(jq -r 'select(.session_id != null) | .session_id' \
+  .claude/review-runs/<run-id>/codex-warm.jsonl | head -1)"
+
+# Persist the session token + bundle hash + CLI version for reuse across §4.5 and §6.5
+bundle_hash="$(sha256sum .claude/review-runs/<run-id>/context-bundle.md | awk '{print $1}')"
+cat > .claude/codex-session-veyra.json <<EOF
+{ "session_id": "$session_id",
+  "bundle_sha256": "$bundle_hash",
+  "warm_started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "codex_version": "$(codex --version 2>/dev/null)" }
+EOF
 ```
 
-If the verified CLI does not expose sessions, fall through to per-call `--system-file context-bundle.md` (Option 2 from the design discussion). Either way: codex pays the bundle cost once per shell session, not once per /step call.
+Subsequent §4.5 (plan review) and §6.5 (diff review) calls in this shell session **always** use `codex exec resume "$session_id"` against the saved token — codex pays the bundle cost once, not once per /step call. There is no `codex session new` / `codex session continue` in the verified CLI; using those would fail.
+
+If the warm call fails (codex not on PATH, non-zero exit, empty `session_id`, or `bundle_hash` mismatch on a later check): fall through to §4.5.6 (no codex; user approval via `ExitPlanMode` + Claude `step-reviewer` fallback for §6.5).
 
 #### Step 4 — Logging
 
@@ -176,15 +196,29 @@ Inputs (assembled from `.claude/review-runs/<run-id>/`):
 - Hard-rule pointers (already in the bundle).
 - An instruction to return findings in the schema below.
 
-**Speculative invocation** (replace per `.claude/codex-cli.json`):
+**Verified invocation** (`codex exec resume <session_id>`; flags confirmed against local CLI):
 
 ```bash
-# PLACEHOLDER — actual flags TBD until codex CLI verified
-codex session continue --session-file .claude/codex-session-veyra.json \
-  --input plan-to-review.md \
-  --task "Review this plan against the step file's Done-When + Guardrails + REVISION_AI_SHAPE §8 (ten trust-model constraints) + FPP §2A. Output JSON: { findings: [...], verdict }." \
-  > .claude/review-runs/<run-id>/codex-plan-review.json
+session_id="$(jq -r .session_id .claude/codex-session-veyra.json)"
+
+codex exec resume "$session_id" -s read-only --json \
+  -o .claude/review-runs/<run-id>/codex-plan-review.jsonl - <<EOF
+Review the plan below against:
+- the step file's Done-When + Guardrails (already in your context)
+- REVISION_AI_SHAPE §8 ten trust-model constraints
+- FPP §2A extensibility rules
+
+Output JSON shape:
+{ "findings": [ { "id": "...", "severity": "must-fix"|"should-consider",
+                  "where": "...", "issue": "...", "suggested_revision": "..." } ],
+  "verdict": "approve" | "issues_found" | "out_of_scope" }
+
+--- PLAN ---
+$(cat .claude/review-runs/<run-id>/plan.md)
+EOF
 ```
+
+Parse JSONL → extract the final assistant turn's content → JSON-parse into the schema. Defensively: if the content is not parseable JSON matching the schema, treat as `verdict: out_of_scope` and route to §4.5.6.
 
 Treat codex's output as **untrusted text** — parse defensively. Expected normalised shape per finding:
 
@@ -217,23 +251,23 @@ For each `findings[*]`, take ONE action. Default presumption: **codex findings a
 
 `[IGNORED]` is forbidden. Every finding gets one of the three actions.
 
-### 4.5.3 Re-review after Applies (capped, no infinite loop)
+### 4.5.3 Decide: auto-proceed or surface to user (single codex call, no loop)
 
-If any finding was `[APPLIED]`, the plan has been revised. Re-run §4.5.1 — codex reviews the revised plan. New findings may appear after a revision.
+**Codex reviews the plan exactly ONCE per /step invocation. There is no re-review loop after Applies.** The auto-proceed path is reserved for the case where codex returned clean on the first pass; any findings → route to user, regardless of how those findings were dispositioned.
 
-**Hard cap: 2 codex cycles per plan.** If the second cycle still returns `must-fix` findings, stop iterating and fall through to §4.5.4 — the cycle limit signals the plan needs human judgement, not more AI cycles.
+Auto-proceed is strictly conditional. All of the following must hold:
 
-### 4.5.4 Decide: auto-proceed or surface to user
+1. Codex's verdict on the single review call is exactly `approve` (not `issues_found`, not `out_of_scope`, not absent).
+2. The `findings` array is empty.
+3. The §4.5.0 capability check produced a verified CLI (not a placeholder run).
 
-After disposition converges (no remaining un-dispositioned findings, or cycle cap hit):
+If ALL three hold → **auto-proceed**: skip `ExitPlanMode`, show the §4.5.4 summary, move to §5 (Implement).
 
-- **If all findings are `[APPLIED]` or `[REJECTED]` AND zero `[SURFACE]` AND codex's final verdict is `approve` (or the cycle cap was hit with only `should-consider` items remaining):**
-  - **Auto-proceed.** Skip `ExitPlanMode`. Show the user a one-message summary (per §4.5.5) and move directly to §5 (Implement).
-  - This is what "not wait for me" means: codex did the review pass, the skill dispositioned the findings, the user gets to read the receipt — not stop the work.
-- **If any finding is `[SURFACE]` OR codex's final verdict is `issues_found` OR cycle cap hit with `must-fix` remaining:**
-  - **Call `ExitPlanMode`** with the plan + codex's findings + the skill's disposition record attached. Wait for user. The user reads the codex receipt + the surface items and approves, revises, or scope-backs.
+If ANY one fails → **fall back to user approval**: call `ExitPlanMode` with the plan + codex's findings + the skill's disposition record (the `[APPLIED]` / `[REJECTED]` / `[SURFACE]` markings from §4.5.2) + the explicit reason auto-proceed was denied (e.g. "codex returned issues_found with 2 findings" / "codex returned out_of_scope" / "verified CLI not available"). Wait for user.
 
-### 4.5.5 Show the user a consolidated summary
+This is the asymmetric default the user asked for: clean codex approval auto-proceeds; anything else waits. The skill dispositions findings to give the user a clean reading surface — but does NOT re-ask codex to confirm the dispositions. Re-asking would mean another token round-trip with the same context for marginal gain; the user is the right oracle for "is the disposition acceptable?"
+
+### 4.5.4 Show the user a consolidated summary
 
 Whether auto-proceeding or waiting, the user gets **one message** with this structure:
 
@@ -252,8 +286,7 @@ Plan pre-review — codex disposition
     - <plan section>: <one-line description of why this needs you>
     - ...
 
-  Codex verdict (final cycle): approve | issues_found | out_of_scope
-  Cycles run: 1 | 2
+  Codex verdict: approve | issues_found | out_of_scope
   Mode: auto-proceeded | waiting for your approval
 ```
 
@@ -261,18 +294,27 @@ If `auto-proceeded`: continue to §5 immediately. The user can interrupt if they
 
 If `waiting for your approval`: the message above is followed by `ExitPlanMode`. Standard approval flow applies.
 
-### 4.5.6 Fallback when codex is unavailable
+### 4.5.5 Fallback when codex is unavailable, unparseable, or out-of-scope
 
-If codex is not on `PATH`, returns a non-zero exit, times out, or returns unparseable output:
+Trigger conditions (any one):
 
-- Log the attempt + the failure reason to `scan-actions.log`.
-- Note in the §4.5.5 summary: "codex pre-review unavailable ({reason}); falling back to manual `ExitPlanMode`."
-- Call `ExitPlanMode` with the plan as written (no codex disposition).
-- The §4.5 section ran; it just produced no output. Do not silently skip the section entirely.
+- `codex` binary not on `PATH`.
+- §4.5.0 capability probe never completed successfully on this machine.
+- Non-zero exit from the review call.
+- Timeout (configurable; default 60s).
+- Unparseable output (cannot be normalised to the §4.5.1 schema).
+- Codex returns `verdict: out_of_scope`.
 
-### Then call `ExitPlanMode` (only when §4.5.4 says wait), or move to §5 directly (when §4.5.4 says auto-proceed)
+Behaviour:
 
-Do not start work before either (a) `ExitPlanMode` approval, or (b) §4.5.4 auto-proceed condition. Do not write code in the plan message itself.
+- Log the attempt + the specific failure reason to `.claude/codex-review.log` (never to `scan-actions.log`).
+- Note in the §4.5.5 summary: "codex pre-review fell back to user approval — reason: <one-line>."
+- Call `ExitPlanMode` with the plan + whatever partial codex output existed (so the user can see what codex did manage to say).
+- The §4.5 section ran; it just routed to user approval. Do not silently skip the section entirely.
+
+### Then call `ExitPlanMode` (only when §4.5.3 routes to user), or move to §5 directly (when §4.5.3 auto-proceeds)
+
+Do not start work before either (a) `ExitPlanMode` approval, or (b) §4.5.3 auto-proceed condition. Do not write code in the plan message itself.
 
 ## 5. Implement
 
@@ -326,49 +368,79 @@ Do not auto-fix unless the fix is obviously inside the step's scope and you can 
 
 After verification passes:
 
-### 6.5.1 Run the review (codex preferred, Claude subagent fallback)
+### 6.5.0 Reuse the shared codex session from §4.5.0
 
-**Primary path — codex against the diff (reuses the session warm-up from §4.5.0):**
+§6.5 is the final-diff review. It is **not a separate codex invocation chain** — it reuses the same warmed session that §4.5 used for the plan. The bundle (FPP + P1 + P2 + REVISION + step file + CLAUDE.md hard rules) is already in codex's context; this call adds only the marginal inputs below.
 
-Use the same codex session that's been answering plan reviews this shell. The project context (FPP + P1 + P2 + REVISION + CLAUDE.md) is already cached server-side, so this call costs only the marginal tokens for the diff and the step file. Concretely:
+If the §4.5.0 capability check resulted in fallback-only mode (no verified CLI), this section ALSO falls back — to the Claude `step-reviewer` subagent — per §6.5.6.
+
+### 6.5.1 Run the diff review (codex primary, Claude `step-reviewer` fallback)
+
+**Primary path — codex against the actual implementation, reusing the warm session.** Inputs (assembled into `.claude/review-runs/<run-id>/`):
+
+- `git diff HEAD` — the implementation diff. Written via `git diff` itself (binary files are excluded by default; large diffs are bounded by the same review-run truncation guards used elsewhere).
+- The **approved plan** from §4.5 (snapshot saved to `<run-id>/plan-snapshot.md` so codex can check the diff against what was planned, not just against the step file).
+- The **verification output** from §6 (stdout + stderr + exit code of the step's `Verification:` command). Codex uses this to confirm tests actually passed, not just that the diff lands.
+- (The step file in full is already in the warm session's bundle — not repeated as an input.)
+
+**No shell-side `cat` loop over modified files.** Codex inspects the repo itself in read-only sandbox via the `-C` and `-s read-only` flags — it pulls additional file context as needed without raw `cat` (which would break on filenames with spaces, deleted files, binary files, and oversize content). The diff + plan + verification artifacts are the bounded text inputs we provide; everything else, codex sees in the sandboxed working tree.
+
+**Verified invocation** (`codex exec resume <session_id>`; flags confirmed against local CLI):
 
 ```bash
-# Inputs to codex for post-implementation review
-git diff HEAD > "$REVIEW_INPUT_DIFF"
-cat "$STEP_FILE" > "$REVIEW_INPUT_STEP"
+session_id="$(jq -r .session_id .claude/codex-session-veyra.json)"
 
-# If a modified file's diff lacks needed surrounding context, include the
-# full file too — codex doesn't have a Read tool, so context that doesn't
-# fit in the diff hunk must be passed explicitly.
-for f in $(git diff --name-only HEAD); do
-  cat "$f" >> "$REVIEW_INPUT_FULLFILES"
-done
+# Bounded text artifacts: diff + verification + plan snapshot
+git diff HEAD > .claude/review-runs/<run-id>/diff.patch
+cat > .claude/review-runs/<run-id>/verification-output.txt <<EOF
+=== verification command exit code: $VERIFY_EXIT_CODE ===
+--- stdout ---
+$(cat .claude/review-runs/<run-id>/verify-stdout.txt 2>/dev/null)
+--- stderr ---
+$(cat .claude/review-runs/<run-id>/verify-stderr.txt 2>/dev/null)
+EOF
+cp .claude/review-runs/<run-id>/plan.md .claude/review-runs/<run-id>/plan-snapshot.md
 
-# Send to codex using the warmed session id from ~/.claude/.codex-session-veyra
-codex session continue "$(cat ~/.claude/.codex-session-veyra)" \
-  --input "$REVIEW_INPUT_DIFF" \
-  --input "$REVIEW_INPUT_STEP" \
-  --input "$REVIEW_INPUT_FULLFILES" \
-  --task "Review this diff against the step file's Done-When, Guardrails, and the project's ten trust-model constraints (RESHAPE §8). Same output format as step-reviewer agent: MUST-fix / SHOULD-consider / Looks clean. Three-line per finding shape." \
-  --output-format json \
-  > "$CODEX_REVIEW_OUT"
+codex exec resume "$session_id" -C "$REPO_ROOT" -s read-only --json \
+  -o .claude/review-runs/<run-id>/codex-diff-review.jsonl - <<EOF
+Review the implementation against:
+- the step file's Done-When + Guardrails (already in your context from §4.5.0 warm-up)
+- the approved plan (below)
+- the verification output (below)
+- the ten trust-model constraints in REVISION_AI_SHAPE §8
+- FPP §2A extensibility rules
+
+You have read-only access to the working tree in your sandbox; consult files there for any context beyond the diff hunk. Do NOT modify anything.
+
+Output JSON: same shape as the plan-review schema, three-line per finding (where / violation / how-to-fix), with verdict.
+
+--- DIFF (git diff HEAD) ---
+$(cat .claude/review-runs/<run-id>/diff.patch)
+
+--- VERIFICATION OUTPUT ---
+$(cat .claude/review-runs/<run-id>/verification-output.txt)
+
+--- APPROVED PLAN ---
+$(cat .claude/review-runs/<run-id>/plan-snapshot.md)
+EOF
 ```
 
-(Exact flags adjust to your codex CLI per the §4.5.0 wiring.)
+Parse JSONL → extract the final assistant turn → JSON-parse → normalise to `step-reviewer`'s three-line per-finding shape.
 
-Parse codex's output into the same shape `step-reviewer` produces (MUST-fix / SHOULD-consider / Looks clean blocks, three-line per-finding format: where + violation + how-to-fix). Quote it verbatim under heading **"Step review report (codex)"**.
+Parse codex's output into the same shape `step-reviewer` produces. Quote it verbatim under heading **"Step review report (codex)"**.
 
-**Fallback path — Claude `step-reviewer` subagent:**
+**Fallback path — Claude `step-reviewer` subagent.** Triggered when any of:
 
-If any of these is true:
-- codex is not available on `PATH`
-- the session warm-up at §4.5.0 failed
-- codex returned a non-zero exit or unparseable output
-- the user passed `--no-codex-review` to force the fallback
+- §4.5.0 capability check produced a placeholder/fallback-only CLI state.
+- codex returned non-zero exit or unparseable output for this diff review.
+- session token from `.claude/codex-session-veyra.json` is stale (bundle hash mismatch) and re-warm fails.
+- the user passed `--no-codex-review`.
 
-then spawn the `step-reviewer` Claude subagent with the step number (the original path). It reads the step file, the phase plan section(s), and the big-picture rules — then reviews the diff against all three layers. Quote its full report under heading **"Step review report (claude step-reviewer fallback)"**.
+Spawn the `step-reviewer` Claude subagent (existing path). Quote its report under heading **"Step review report (claude step-reviewer fallback)"**.
 
-The review is the gate; only the source changes between codex and Claude. The §6.5.2 disposition rules apply identically to either reviewer's output.
+**The §6.5.2 disposition rules apply identically to either reviewer's output.** The review is the gate; only the source changes between codex and Claude.
+
+Every review attempt (codex or fallback) writes a row to `.claude/codex-review.log`. Never to `scan-actions.log`.
 
 ### 6.5.2 Resolve every finding (do not just show the list)
 
@@ -389,14 +461,16 @@ You may NOT mark a finding `[IGNORED]`, `[N/A]`, or any equivalent. Every findin
 
 If any finding was `[APPLIED]`, re-run §6 (the step's `Verification:` command). If it now fails, you broke something while applying — fix the new failure, then re-run again. Do not move to §6.5.4 until verification is green AND every finding has a resolution.
 
-### 6.5.4 Re-review after Applies
+### 6.5.4 Decide: clean handoff or surface to user (single review call, no loop)
 
-If any finding was `[APPLIED]`, spawn `step-reviewer` a second time. New findings can appear after a fix lands. Repeat §6.5.2 → §6.5.3 → §6.5.4 until the agent returns either:
+**Codex (or `step-reviewer` fallback) reviews the diff exactly ONCE per /step invocation. There is no re-review after Applies.** Same rule as §4.5.3 for the plan stage: clean verdict on the single call auto-routes to §6.5.5; any findings → consolidated summary → surface to user for Status-update OK.
 
-- `ship as-is` with zero MUST-fix and zero un-resolved findings — proceed to §6.5.5.
-- A report whose only remaining MUST-fix findings are all `[REJECTED]` or `[SURFACE]`, with the user having explicitly OK'd the path — proceed to §6.5.5.
+Cases:
 
-**Hard cap: 3 review cycles per step.** If the review hasn't converged after 3 cycles, stop, surface the state to the user, and ask whether to scope back or override.
+- **Reviewer's verdict was `approve` / `ship as-is` on the first call AND zero findings:** route directly to §6.5.5 with `mode: clean — no findings`. User sees the empty disposition list and gives the explicit Status-update OK per §7.
+- **Reviewer's verdict was anything else (`issues_found` / findings emitted):** apply the §6.5.2 disposition (`[APPLIED]` / `[REJECTED]` / `[SURFACE]`), re-run §6.5.3 verification once if any `[APPLIED]` change made it to the diff, then route to §6.5.5. Do NOT re-spawn the reviewer to check the post-Apply state. The user is the oracle for "did the applied fix land correctly?" — they see the dispositions in §6.5.5 and decide.
+
+If the re-verification at §6.5.3 fails (i.e. an Applied fix broke `pnpm typecheck` or the step's test command), surface to user with the failure included; do NOT silently retry or re-ask the reviewer.
 
 ### 6.5.5 Produce the consolidated summary
 
@@ -436,9 +510,9 @@ Second fallback: `plan-adherence` Claude subagent — narrowest scope (phase-pla
 You may update the Status header **only when ALL of the following are true**:
 
 1. §6 verification command exited 0 (the most recent run, after any §6.5.3 re-verification).
-2. §6.5 completed: every reviewer finding has an `[APPLIED]`, `[REJECTED: reason]`, or `[SURFACE]` resolution. No `[IGNORED]`, no skipped findings.
-3. The reviewer's final cycle returned `ship as-is`, OR the user explicitly OK'd a final state that still has `[REJECTED]` or `[SURFACE]` items in it.
-4. The user has signalled approval ("ok", "proceed", "ship it", "yes update status", or equivalent) AFTER seeing the §6.5.5 consolidated summary.
+2. §6.5 completed: every reviewer finding (codex OR Claude `step-reviewer` fallback) has an `[APPLIED]`, `[REJECTED: reason]`, or `[SURFACE]` resolution. No `[IGNORED]`, no skipped findings.
+3. The reviewer's final cycle returned a clean verdict (codex `approve` or `step-reviewer` `ship as-is`), OR the user explicitly OK'd a final state that still has `[REJECTED]` or `[SURFACE]` items in it.
+4. **The user has signalled explicit approval** ("ok", "proceed", "ship it", "yes update status", or equivalent) AFTER seeing the §6.5.5 consolidated summary. **Codex's clean verdict does not bypass this.** Auto-proceed is allowed at §4.5 (plan stage) but NEVER at §7 (Status-update stage). Status: done always requires an explicit human signal.
 
 Then edit the step file. Change `**Status:** not started` to `**Status:** done (YYYY-MM-DD)`. Use today's date. If a commit hash is available (the user has already committed), append it: `**Status:** done (YYYY-MM-DD, commit <short-sha>)`.
 
@@ -466,11 +540,15 @@ Show `git status` and `git diff --stat`. The user commits, not you. The diff is 
 - Add a dependency the step file didn't ask for.
 - Expand into a later step's scope.
 - Loosen a test or assertion to make verification pass.
-- **Skip §6.5 (the `step-reviewer` review).** The review is the gate, not a suggestion. If the agent fails to spawn, run the `plan-adherence` fallback and mark it explicitly.
-- **Skip §4.5 (the codex pre-review) when codex is available.** The disposition record is what makes auto-proceed defensible. If codex is unavailable, §4.5.6 fallback applies — but the section ran.
+- **Skip §6.5 (the mandatory review).** The review is the gate, not a suggestion. The reviewer can be codex (primary) or `step-reviewer` Claude subagent (fallback), but the section runs.
+- **Skip §4.5 when codex is available.** Codex is the plan-review backend. If codex is unavailable, §4.5.6 routes to `ExitPlanMode` — but the section ran.
 - **Silently dismiss a reviewer or codex finding.** Every finding gets `[APPLIED]`, `[REJECTED: reason]`, or `[SURFACE]`. No `[IGNORED]`, no implicit "I didn't think it applied."
 - **Reject a finding without naming what is specifically wrong in one sentence.** "Disagree" is not a reason; "the finding cites a file the diff didn't touch" is.
-- **Auto-proceed past §4.5 when any finding is `[SURFACE]` or codex's verdict is `issues_found`.** Surface items require human approval; auto-proceed is for clean dispositions only.
-- **Run more than 2 codex cycles per plan.** The cap is hard. Cycle limits signal the plan needs a human, not more AI iterations.
+- **Auto-proceed past §4.5 unless ALL of §4.5.3's three conditions hold.** Specifically: codex must return exactly `verdict: approve` with an empty `findings` array, AND the CLI must have been verified (not placeholder). Anything ambiguous → `ExitPlanMode`.
+- **Auto-proceed past §6.5 (or §7 Status-update) on the reviewer's verdict alone.** Auto-proceed exists only at §4.5 (plan stage, single codex call, clean verdict). Status: done always requires explicit human approval, regardless of how clean the diff review came back.
+- **Hardcode codex CLI commands** without first verifying them at §4.5.0 capability check. Invocations must be confirmed against `.claude/codex-cli.json` before use.
+- **Write codex/workflow review logs to `scan-actions.log`.** That file is Veyra scan runtime, not workflow automation. All review-related logging goes to `.claude/codex-review.log` and per-run state to `.claude/review-runs/<run-id>/`.
+- **Re-ask codex (or the `step-reviewer` fallback) after applying its feedback.** One review call per stage. After §4.5.2 / §6.5.2 disposition lands, do NOT loop back to ask the reviewer again. The user is the oracle for "did the Apply land correctly?" — they see the dispositions and decide. Re-asking burns tokens for marginal gain.
+- **Run §6.5.3 re-verification more than once per /step invocation.** If an `[APPLIED]` fix triggers a re-verification and that re-run fails, surface to user with the failure included. Do NOT loop on verification.
 - **Update the Status header before §6.5.5's consolidated summary has been shown to the user AND explicit user OK has been received.**
 - Commit.

@@ -20,3 +20,11 @@ coverage/
 
 # Per-user Claude Code overrides (settings.json is shared and tracked)
 .claude/settings.local.json
+
+# Per-machine /step workflow state (codex session tokens, review-run
+# artifacts, CLI capability probe). Not deliverables; per-user/per-shell.
+.claude/codex-cli.json
+.claude/codex-session-veyra.json
+.claude/codex-review.log
+.claude/review-runs/
+.claude/plans/
