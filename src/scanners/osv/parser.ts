@@ -1,25 +1,13 @@
 import { ScannerOutputParseError } from '../../types/errors.js';
 import { type Result, err, ok } from '../../types/result.js';
 
-import type {
-  OsvEvidenceStrength,
-  OsvFinding,
-  OsvFindingType,
-  OsvReviewAction,
-} from './types.js';
+import type { OsvFinding } from './types.js';
 
 const SCANNER = 'osv-scanner';
 
-/**
- * Pinned defaults from step 06 Done-When clause:
- *   - dependency findings are tagged `likely_issue` (silence ≠ safe,
- *     presence ≠ exploitable; Guardrails forbid `confirmed_issue`)
- *   - evidence strength is `medium` by default
- *   - review action is `review_before_launch`
- */
-const DEFAULT_FINDING_TYPE: OsvFindingType = 'likely_issue';
-const DEFAULT_EVIDENCE_STRENGTH: OsvEvidenceStrength = 'medium';
-const DEFAULT_REVIEW_ACTION: OsvReviewAction = 'review_before_launch';
+// Step 06b removed parser-side classification (`findingType`,
+// `evidenceStrength`, `reviewAction`). Classification lives in the
+// tool-runner agent's `CLASSIFICATION` map per scanner_id.
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -147,9 +135,6 @@ export function parseOsvJson(
           ecosystem,
           summary,
           ...(severity !== undefined ? { severity } : {}),
-          findingType: DEFAULT_FINDING_TYPE,
-          evidenceStrength: DEFAULT_EVIDENCE_STRENGTH,
-          reviewAction: DEFAULT_REVIEW_ACTION,
         });
       }
     }

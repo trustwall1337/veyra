@@ -3,6 +3,7 @@ import type {
   ScannerNotInstalledError,
   ScannerOutputParseError,
 } from '../../types/errors.js';
+import type { ScanFact } from '../../types/scan-fact.js';
 
 /** Input to {@link runOsv}. */
 export interface OsvInput {
@@ -18,17 +19,15 @@ export interface OsvInput {
 }
 
 /**
- * Compile-time-pinned defaults that match the step file's Done-When clause:
- * dependency findings are launch-readiness signals, not proof of
- * exploitability. The literal-type union also doubles as a guardrail
- * against drift — assigning `'confirmed_issue'` to `findingType` would
- * not type-check.
+ * Normalized OSV finding, one per (package, vulnerability) pair.
+ *
+ * **Step 06b**: scanner-side assertion-layer classification fields
+ * (`findingType`, `evidenceStrength`, `reviewAction`) were removed. The
+ * authoritative classification lives in the tool-runner agent's
+ * `CLASSIFICATION` map (`src/agents/tool-runner/tool-runner.ts`),
+ * which is consulted at finding-emission time. Scanner adapters now
+ * emit pure observation: what package, what advisory id, where.
  */
-export type OsvFindingType = 'likely_issue' | 'informational';
-export type OsvEvidenceStrength = 'medium';
-export type OsvReviewAction = 'review_before_launch';
-
-/** Normalized OSV finding, one per (package, vulnerability) pair. */
 export interface OsvFinding {
   /** Primary OSV id (e.g. `GHSA-...` or `CVE-...`). */
   readonly vulnerabilityId: string;
@@ -44,14 +43,21 @@ export interface OsvFinding {
   readonly summary: string;
   /** Severity string if osv-scanner reported one; absent otherwise. */
   readonly severity?: string;
-  readonly findingType: OsvFindingType;
-  readonly evidenceStrength: OsvEvidenceStrength;
-  readonly reviewAction: OsvReviewAction;
 }
 
-/** Output of {@link runOsv} on a successful run. */
+/**
+ * Output of {@link runOsv} on a successful run.
+ *
+ * `findings` is the pre-revision shape consumed today by the tool-runner
+ * agent (step 08). `facts` is the revision §3.1 + §9 step-06-row shape:
+ * generic `ScanFact[]` records that downstream assertion predicates
+ * (cc-11-10 in step 09b–12b) consume. Step 08b aggregates these facts
+ * into `scan-facts.json` without transformation; the adapter return
+ * shape IS the artifact shape.
+ */
 export interface OsvOutput {
   readonly findings: readonly OsvFinding[];
+  readonly facts: readonly ScanFact[];
 }
 
 /** Union of every typed failure mode the adapter can return. */

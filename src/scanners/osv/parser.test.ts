@@ -63,52 +63,20 @@ describe('parseOsvJson — well-formed inputs', () => {
   });
 });
 
-describe('parseOsvJson — Done-When defaults', () => {
-  // Done-when line 27: findings are tagged with `evidence_strength: medium`
-  // and `review_action: review_before_launch` by default.
-  it('tags every finding with findingType: likely_issue', async () => {
+describe('parseOsvJson — pure observation (no scanner-side classification)', () => {
+  // Step 06b removed scanner-side classification: `findingType`,
+  // `evidenceStrength`, `reviewAction` are no longer parser fields.
+  // Classification lives in the tool-runner agent's CLASSIFICATION map.
+  it('emits no classification fields on OsvFinding (boundary check)', async () => {
     const stdout = await loadFixture('with-findings');
     const result = parseOsvJson(stdout);
     expect(isOk(result)).toBe(true);
     if (isOk(result)) {
       for (const f of result.value) {
-        expect(f.findingType).toBe('likely_issue');
-      }
-    }
-  });
-
-  it('tags every finding with evidenceStrength: medium', async () => {
-    const stdout = await loadFixture('with-findings');
-    const result = parseOsvJson(stdout);
-    expect(isOk(result)).toBe(true);
-    if (isOk(result)) {
-      for (const f of result.value) {
-        expect(f.evidenceStrength).toBe('medium');
-      }
-    }
-  });
-
-  it('tags every finding with reviewAction: review_before_launch', async () => {
-    const stdout = await loadFixture('with-findings');
-    const result = parseOsvJson(stdout);
-    expect(isOk(result)).toBe(true);
-    if (isOk(result)) {
-      for (const f of result.value) {
-        expect(f.reviewAction).toBe('review_before_launch');
-      }
-    }
-  });
-
-  // Guardrail (line 32): "Dependency findings must NOT be emitted as
-  // confirmed_issue." The literal-type union locks this at compile time;
-  // this test is a runtime back-stop.
-  it('never tags a finding as confirmed_issue', async () => {
-    const stdout = await loadFixture('with-findings');
-    const result = parseOsvJson(stdout);
-    expect(isOk(result)).toBe(true);
-    if (isOk(result)) {
-      for (const f of result.value) {
-        expect(f.findingType).not.toBe('confirmed_issue');
+        const record = f as unknown as Record<string, unknown>;
+        expect(record['findingType']).toBeUndefined();
+        expect(record['evidenceStrength']).toBeUndefined();
+        expect(record['reviewAction']).toBeUndefined();
       }
     }
   });

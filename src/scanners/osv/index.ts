@@ -1,13 +1,10 @@
-export { buildOsvArgs, runOsv } from './adapter.js';
+export { OSV_SCANNER_ID, buildOsvArgs, runOsv } from './adapter.js';
 export { parseOsvJson } from './parser.js';
 export type {
   OsvError,
-  OsvEvidenceStrength,
   OsvFinding,
-  OsvFindingType,
   OsvInput,
   OsvOutput,
-  OsvReviewAction,
   OsvRunner,
   OsvRunnerOptions,
   OsvRunnerResult,

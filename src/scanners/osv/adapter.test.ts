@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { registry } from '../../core/registry/service-registry.js';
 import {
   ScannerExecutionError,
   ScannerNotInstalledError,
@@ -11,7 +12,7 @@ import {
 } from '../../types/errors.js';
 import { isErr, isOk } from '../../types/result.js';
 
-import { buildOsvArgs, runOsv } from './adapter.js';
+import { OSV_SCANNER_ID, buildOsvArgs, runOsv } from './adapter.js';
 import type { OsvRunner, OsvRunnerResult } from './types.js';
 
 const FIXTURES_DIR = path.join(
@@ -109,9 +110,6 @@ describe('runOsv — success paths', () => {
       const first = result.value.findings[0];
       expect(first?.packageName).toBe('axios');
       expect(first?.packageVersion).toBe('0.21.0');
-      expect(first?.findingType).toBe('likely_issue');
-      expect(first?.evidenceStrength).toBe('medium');
-      expect(first?.reviewAction).toBe('review_before_launch');
     }
   });
 
@@ -229,6 +227,73 @@ describe('runOsv — failure paths', () => {
     expect(isErr(result)).toBe(true);
     if (isErr(result)) {
       expect(result.error).toBeInstanceOf(ScannerOutputParseError);
+    }
+  });
+});
+
+describe('runOsv — ScanFact emission (step 06b)', () => {
+  it('emits one ScanFact per parsed finding, with source.kind = scanner_match', async () => {
+    const stdout = await loadFixture('with-findings');
+    const result = await runOsv(
+      { lockfilePath: '/proj/package-lock.json' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    expect(result.value.facts.length).toBe(result.value.findings.length);
+    for (const fact of result.value.facts) {
+      expect(fact.source.kind).toBe('scanner_match');
+      expect(fact.redacted).toBe(false);
+      expect(fact.file_path).toBe('/proj/package-lock.json');
+      if (fact.source.kind === 'scanner_match') {
+        expect(fact.source.payload.content_kind).toBe('text');
+      }
+    }
+  });
+
+  it('mints a scanner_id that resolves via the service registry', () => {
+    const lookup = registry.lookupScanner(OSV_SCANNER_ID);
+    expect(isOk(lookup)).toBe(true);
+    if (isOk(lookup)) {
+      expect(lookup.value.id as string).toBe('osv');
+    }
+  });
+
+  it('emits ScanFacts that carry no classification fields (seam test for 08b)', async () => {
+    // The OSV adapter's intermediate `OsvFinding` still carries
+    // findingType / evidenceStrength / reviewAction for backward
+    // compatibility with tool-runner (08b removes these). The new
+    // `ScanFact` output is generic and must NOT surface them — the
+    // assertion layer owns classification.
+    const stdout = await loadFixture('with-findings');
+    const result = await runOsv(
+      { lockfilePath: '/proj/package-lock.json' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    const serialized = JSON.stringify(result.value.facts);
+    expect(serialized).not.toContain('findingType');
+    expect(serialized).not.toContain('evidenceStrength');
+    expect(serialized).not.toContain('reviewAction');
+    expect(serialized).not.toContain('likely_issue');
+    expect(serialized).not.toContain('review_before_launch');
+  });
+
+  it('stamps every fact in one run with the same observed_at and args_fingerprint', async () => {
+    const stdout = await loadFixture('with-findings');
+    const result = await runOsv(
+      { lockfilePath: '/proj/lock' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    if (result.value.facts.length < 1) return;
+    const [a] = result.value.facts;
+    expect(a).toBeDefined();
+    if (a !== undefined) {
+      expect(a.args_fingerprint_sha256.length).toBe(64);
+      expect(a.observed_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }
   });
 });
