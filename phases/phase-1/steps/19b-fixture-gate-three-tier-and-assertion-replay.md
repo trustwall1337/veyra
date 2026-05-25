@@ -1,6 +1,6 @@
 # Step 19b — Fixture gate: three-tier output + `--no-ai` baseline + assertion-replay determinism
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §12 step 19 row`; revision §14 Q7
 **Amends Phase 1 step:** 19
 **Produces:** verification only (no new code)
