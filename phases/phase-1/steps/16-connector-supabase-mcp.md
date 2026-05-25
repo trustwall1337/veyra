@@ -1,6 +1,6 @@
 # Step 16 — Supabase MCP read-only connector
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 8`, §4.4, `CLAUDE.md §MCP discipline`
 **Produces:** `src/connectors/supabase/`
 **Depends on:** 02
