@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { registry } from '../../core/registry/service-registry.js';
 import {
   ScannerExecutionError,
   ScannerNotInstalledError,
@@ -11,7 +12,11 @@ import {
 } from '../../types/errors.js';
 import { isErr, isOk } from '../../types/result.js';
 
-import { buildGitleaksArgs, runGitleaks } from './adapter.js';
+import {
+  GITLEAKS_SCANNER_ID,
+  buildGitleaksArgs,
+  runGitleaks,
+} from './adapter.js';
 import type {
   GitleaksRunner,
   GitleaksRunnerResult,
@@ -220,6 +225,79 @@ describe('runGitleaks — failure paths', () => {
     if (isErr(result)) {
       expect(result.error).toBeInstanceOf(ScannerOutputParseError);
     }
+  });
+});
+
+describe('runGitleaks — ScanFact emission (step 05b)', () => {
+  it('emits one ScanFact per parsed finding, with source.kind = scanner_match', async () => {
+    const stdout = await loadFixture('with-findings');
+    const result = await runGitleaks(
+      { projectPath: '/proj' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    expect(result.value.facts.length).toBe(result.value.findings.length);
+    for (const fact of result.value.facts) {
+      expect(fact.source.kind).toBe('scanner_match');
+      expect(fact.redacted).toBe(true);
+      if (fact.source.kind === 'scanner_match') {
+        expect(fact.source.payload.content_kind).toBe(
+          'redacted_secret_context',
+        );
+      }
+    }
+  });
+
+  it('mints a scanner_id that resolves via the service registry', async () => {
+    const lookup = registry.lookupScanner(GITLEAKS_SCANNER_ID);
+    expect(isOk(lookup)).toBe(true);
+    if (isOk(lookup)) {
+      expect(lookup.value.id as string).toBe('gitleaks');
+    }
+  });
+
+  it('stamps every fact in one run with the same observed_at and args_fingerprint', async () => {
+    const stdout = await loadFixture('with-findings');
+    const result = await runGitleaks(
+      { projectPath: '/proj' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    const [a, b] = result.value.facts;
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    if (a !== undefined && b !== undefined) {
+      expect(a.observed_at).toBe(b.observed_at);
+      expect(a.args_fingerprint_sha256).toBe(b.args_fingerprint_sha256);
+      expect(a.args_fingerprint_sha256.length).toBe(64); // sha256 hex
+      expect(a.fact_id).not.toBe(b.fact_id); // distinct facts
+    }
+  });
+
+  it('does NOT include a raw secret in any ScanFact (parser-leak defense via 02c)', async () => {
+    const fakeAwsKey = ['AK', 'IA', 'IOSFODNN7EXAMPLE'].join('');
+    const stdout = JSON.stringify([
+      {
+        Description: `AWS Access Key: ${fakeAwsKey}`,
+        StartLine: 3,
+        File: '.env',
+        Match: fakeAwsKey,
+        Secret: fakeAwsKey,
+        RuleID: 'aws-access-token',
+        Fingerprint: '.env:aws-access-token:3',
+      },
+    ]);
+    const result = await runGitleaks(
+      { projectPath: '/proj' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    const serializedFacts = JSON.stringify(result.value.facts);
+    expect(serializedFacts).not.toContain(fakeAwsKey);
+    expect(serializedFacts).toContain('REDACTED');
   });
 });
 

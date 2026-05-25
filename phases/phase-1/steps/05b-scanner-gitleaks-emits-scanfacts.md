@@ -1,6 +1,6 @@
 # Step 05b — Gitleaks adapter emits `ScanFact[]` (no Findings)
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §3.1, §9 step 05 row`
 **Amends Phase 1 step:** 05
 **Produces:** amended adapter at `src/scanners/gitleaks/`

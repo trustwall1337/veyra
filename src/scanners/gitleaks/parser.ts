@@ -1,7 +1,7 @@
 import { ScannerOutputParseError } from '../../types/errors.js';
 import { type Result, err, ok } from '../../types/result.js';
 
-import type { GitleaksFinding } from './types.js';
+import type { GitleaksMatch } from './types.js';
 
 /**
  * Patterns the parser scrubs out of any string field it copies from gitleaks
@@ -66,7 +66,7 @@ function asLine(v: unknown): number {
  */
 export function parseGitleaksJson(
   stdout: string,
-): Result<readonly GitleaksFinding[], ScannerOutputParseError> {
+): Result<readonly GitleaksMatch[], ScannerOutputParseError> {
   const trimmed = stdout.trim();
   if (trimmed === '') {
     return ok([]);
@@ -99,7 +99,7 @@ export function parseGitleaksJson(
     );
   }
 
-  const findings: GitleaksFinding[] = [];
+  const matches: GitleaksMatch[] = [];
   for (const entry of raw) {
     if (!isObject(entry)) {
       return err(
@@ -109,13 +109,22 @@ export function parseGitleaksJson(
         ),
       );
     }
-    findings.push({
+    const startCol = asLine(entry.StartColumn);
+    const endCol = asLine(entry.EndColumn);
+    const match: GitleaksMatch = {
       ruleId: redactSecrets(asString(entry.RuleID, 'unknown-rule')),
       filePath: redactSecrets(asString(entry.File, '<unknown-file>')),
       line: asLine(entry.StartLine),
       description: redactSecrets(asString(entry.Description, '')),
       fingerprint: redactSecrets(asString(entry.Fingerprint, '')),
-    });
+      ...(typeof entry.Match === 'string'
+        ? { redactedMatch: redactSecrets(entry.Match) }
+        : {}),
+      ...(startCol > 0 && endCol > 0
+        ? { byteRange: { start: startCol, end: endCol } }
+        : {}),
+    };
+    matches.push(match);
   }
-  return ok(findings);
+  return ok(matches);
 }

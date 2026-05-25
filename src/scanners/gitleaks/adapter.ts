@@ -1,15 +1,24 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
+import { redactSecrets as sanitizeForStorage } from '../../ai/sanitization.js';
+import { registry } from '../../core/registry/service-registry.js';
 import {
   ScannerExecutionError,
   ScannerNotInstalledError,
 } from '../../types/errors.js';
+import { asScannerId, type ScannerId } from '../../types/identity.js';
 import { type Result, err, ok } from '../../types/result.js';
+import type {
+  ScanFact,
+  ScanFactPayload,
+} from '../../types/scan-fact.js';
 
 import { parseGitleaksJson } from './parser.js';
 import type {
   GitleaksError,
   GitleaksInput,
+  GitleaksMatch,
   GitleaksOutput,
   GitleaksRunner,
   GitleaksRunnerResult,
@@ -20,6 +29,38 @@ const BINARY = 'gitleaks';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const INSTALL_HINT =
   'macOS: `brew install gitleaks`. Linux: https://github.com/gitleaks/gitleaks#installing';
+
+/**
+ * Opaque scanner id minted via {@link asScannerId}. Per FPP §2A the
+ * adapter never names this string anywhere downstream; consumers ask
+ * the service registry to resolve it.
+ */
+function mintScannerId(): ScannerId {
+  const r = asScannerId('gitleaks');
+  if (!r.ok) {
+    throw new Error(
+      `gitleaks adapter: invalid hardcoded scanner id: ${r.error.message}`,
+    );
+  }
+  return r.value;
+}
+
+export const GITLEAKS_SCANNER_ID: ScannerId = mintScannerId();
+
+// Module-load registration. Real failures (id collision with a
+// different descriptor) surface as a thrown error so the developer sees
+// them at boot. A second registration with the same id from a re-import
+// would also collide; Node ESM caches modules so this should not happen
+// in practice — if it does, the conflict is the signal.
+const _registration = registry.registerScanner({
+  id: GITLEAKS_SCANNER_ID,
+  displayName: 'Gitleaks',
+});
+if (!_registration.ok) {
+  throw new Error(
+    `gitleaks adapter: failed to register with ServiceRegistry: ${_registration.error.message}`,
+  );
+}
 
 /**
  * Real subprocess runner. Tests inject a fake to keep the suite hermetic
@@ -133,5 +174,64 @@ export async function runGitleaks(
 
   const parsed = parseGitleaksJson(raw.stdout);
   if (!parsed.ok) return err(parsed.error);
-  return ok({ findings: parsed.value });
+
+  // Compute one args fingerprint per scan; every fact from this run
+  // shares it (so consumers can group facts by invocation).
+  const argsFingerprint = sha256(JSON.stringify({ binary: BINARY, args }));
+  const observedAt = new Date().toISOString();
+  const facts = parsed.value.map((m) =>
+    buildScanFact(m, argsFingerprint, observedAt),
+  );
+
+  return ok({ findings: parsed.value, facts });
+}
+
+/**
+ * Wrap one normalized gitleaks match into a generic `ScanFact`. The
+ * `sanitized_excerpt` runs through the 02c AI-sanitization helper as a
+ * second defensive scrub (parser → 02c). Even if the parser missed a
+ * pattern, 02c's broader regex set catches it before storage. The
+ * gitleaks-already-redacted `Match` field is included when available
+ * so downstream consumers see what gitleaks saw (in scrubbed form),
+ * along with `byte_range` when gitleaks emits column positions.
+ */
+function buildScanFact(
+  match: GitleaksMatch,
+  argsFingerprint: string,
+  observedAt: string,
+): ScanFact {
+  const excerptParts: readonly string[] = [
+    `${match.ruleId}: ${match.description}`,
+    match.redactedMatch !== undefined ? `match=${match.redactedMatch}` : '',
+  ].filter((s) => s.length > 0);
+  // `sanitizeForStorage` returns a `SanitizedMessage` brand; we widen
+  // back to string because the ScanFactPayload field is plain string.
+  // The brand's role is to prevent direct AI-prompt leakage; storage
+  // shape doesn't carry the brand.
+  const sanitized: string = sanitizeForStorage(excerptParts.join(' | '));
+  const payload: ScanFactPayload = {
+    sanitized_excerpt: sanitized,
+    content_kind: 'redacted_secret_context',
+    ...(match.byteRange !== undefined ? { byte_range: match.byteRange } : {}),
+  };
+  const factId = sha256(
+    `${GITLEAKS_SCANNER_ID as string}:${match.filePath}:${String(match.line)}:${match.fingerprint}`,
+  );
+  return {
+    fact_id: factId,
+    source: {
+      kind: 'scanner_match',
+      scanner_id: GITLEAKS_SCANNER_ID,
+      payload,
+    },
+    file_path: match.filePath,
+    line: match.line,
+    observed_at: observedAt,
+    args_fingerprint_sha256: argsFingerprint,
+    redacted: true,
+  };
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
