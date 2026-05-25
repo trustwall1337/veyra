@@ -1,6 +1,6 @@
 # Step 13 — Markdown and JSON reporters
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 13`, §4.7, §5; `FINAL_PRODUCT_PLAN §9` report sections
 **Produces:** `src/reporters/markdown/`, `src/reporters/json/`
 **Depends on:** 02
