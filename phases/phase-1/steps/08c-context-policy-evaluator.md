@@ -1,6 +1,6 @@
 # Step 08c — `ContextPolicyEvaluator` standalone module (Phase 1 policy half)
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §5 deny rules, §5.2 sanitization order, §5.3 prompt-injection guard, §6.1 interface`
 **Amends Phase 1 step:** none — new step file
 **Produces:** `src/core/policy/context-policy-evaluator.ts` + tests
