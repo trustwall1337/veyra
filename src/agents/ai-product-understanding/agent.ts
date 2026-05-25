@@ -131,18 +131,18 @@ function buildPrompt(inventory: InventoryBootstrap): SanitizedMessage {
 function isConfidenceTaggedString(v: unknown): v is { value: string; confidence: 'low' | 'medium' | 'high'; uncertainty_notes?: string } {
   if (typeof v !== 'object' || v === null) return false;
   const r = v as Record<string, unknown>;
-  if (typeof r['value'] !== 'string') return false;
-  if (r['confidence'] !== 'low' && r['confidence'] !== 'medium' && r['confidence'] !== 'high') return false;
-  if (r['uncertainty_notes'] !== undefined && typeof r['uncertainty_notes'] !== 'string') return false;
+  if (typeof r.value !== 'string') return false;
+  if (r.confidence !== 'low' && r.confidence !== 'medium' && r.confidence !== 'high') return false;
+  if (r.uncertainty_notes !== undefined && typeof r.uncertainty_notes !== 'string') return false;
   return true;
 }
 
 function isConfidenceTaggedStringList(v: unknown): v is { value: string[]; confidence: 'low' | 'medium' | 'high'; uncertainty_notes?: string } {
   if (typeof v !== 'object' || v === null) return false;
   const r = v as Record<string, unknown>;
-  if (!Array.isArray(r['value']) || !r['value'].every((x) => typeof x === 'string')) return false;
-  if (r['confidence'] !== 'low' && r['confidence'] !== 'medium' && r['confidence'] !== 'high') return false;
-  if (r['uncertainty_notes'] !== undefined && typeof r['uncertainty_notes'] !== 'string') return false;
+  if (!Array.isArray(r.value) || !r.value.every((x) => typeof x === 'string')) return false;
+  if (r.confidence !== 'low' && r.confidence !== 'medium' && r.confidence !== 'high') return false;
+  if (r.uncertainty_notes !== undefined && typeof r.uncertainty_notes !== 'string') return false;
   return true;
 }
 

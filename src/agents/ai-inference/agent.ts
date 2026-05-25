@@ -212,25 +212,25 @@ function isValidContextRequestArgs(
 ): v is ContextRequest['args'] {
   if (typeof v !== 'object' || v === null) return false;
   const r = v as Record<string, unknown>;
-  switch (r['kind']) {
+  switch (r.kind) {
     case 'read_file': {
       const allowed = new Set(['kind', 'path', 'line_range']);
       for (const k of Object.keys(r)) {
         if (!allowed.has(k)) return false;
       }
-      if (typeof r['path'] !== 'string') return false;
-      if (r['line_range'] !== undefined) {
-        const lr = r['line_range'];
+      if (typeof r.path !== 'string') return false;
+      if (r.line_range !== undefined) {
+        const lr = r.line_range;
         if (typeof lr !== 'object' || lr === null) return false;
         const lrr = lr as Record<string, unknown>;
         const lrAllowed = new Set(['start', 'end']);
         for (const k of Object.keys(lrr)) {
           if (!lrAllowed.has(k)) return false;
         }
-        if (typeof lrr['start'] !== 'number' || !Number.isInteger(lrr['start']) || lrr['start'] < 1) {
+        if (typeof lrr.start !== 'number' || !Number.isInteger(lrr.start) || lrr.start < 1) {
           return false;
         }
-        if (typeof lrr['end'] !== 'number' || !Number.isInteger(lrr['end']) || lrr['end'] < 1) {
+        if (typeof lrr.end !== 'number' || !Number.isInteger(lrr.end) || lrr.end < 1) {
           return false;
         }
       }
@@ -241,16 +241,16 @@ function isValidContextRequestArgs(
       for (const k of Object.keys(r)) {
         if (!allowed.has(k)) return false;
       }
-      return typeof r['scope'] === 'string';
+      return typeof r.scope === 'string';
     }
     case 'get_supabase_table_meta': {
       const allowed = new Set(['kind', 'table_names']);
       for (const k of Object.keys(r)) {
         if (!allowed.has(k)) return false;
       }
-      if (r['table_names'] !== undefined) {
-        if (!Array.isArray(r['table_names'])) return false;
-        if (!r['table_names'].every((x) => typeof x === 'string')) return false;
+      if (r.table_names !== undefined) {
+        if (!Array.isArray(r.table_names)) return false;
+        if (!r.table_names.every((x) => typeof x === 'string')) return false;
       }
       return true;
     }
@@ -266,10 +266,10 @@ function isValidContextRequestArgs(
       for (const k of Object.keys(r)) {
         if (!allowed.has(k)) return false;
       }
-      if (typeof r['template_id'] !== 'string') return false;
-      if (r['slots'] !== undefined) {
-        if (typeof r['slots'] !== 'object' || r['slots'] === null) return false;
-        for (const v2 of Object.values(r['slots'])) {
+      if (typeof r.template_id !== 'string') return false;
+      if (r.slots !== undefined) {
+        if (typeof r.slots !== 'object' || r.slots === null) return false;
+        for (const v2 of Object.values(r.slots)) {
           if (typeof v2 !== 'string') return false;
         }
       }
@@ -295,8 +295,8 @@ function parseRawHypotheses(
   for (const k of Object.keys(root)) {
     if (k !== 'hypotheses') return null;
   }
-  if (!Array.isArray(root['hypotheses'])) return null;
-  const arr = root['hypotheses'] as unknown[];
+  if (!Array.isArray(root.hypotheses)) return null;
+  const arr = root.hypotheses as unknown[];
   const out: RawHypothesis[] = [];
   for (const h of arr) {
     if (typeof h !== 'object' || h === null) return null;
@@ -305,10 +305,10 @@ function parseRawHypotheses(
     for (const k of Object.keys(obj)) {
       if (!ALLOWED_HYPOTHESIS_KEYS.has(k)) return null;
     }
-    if (!Array.isArray(obj['evidence_refs']) || obj['evidence_refs'].length === 0) {
+    if (!Array.isArray(obj.evidence_refs) || obj.evidence_refs.length === 0) {
       return null;
     }
-    for (const ref of obj['evidence_refs']) {
+    for (const ref of obj.evidence_refs) {
       if (typeof ref !== 'object' || ref === null) return null;
       const refObj = ref as Record<string, unknown>;
       for (const k of Object.keys(refObj)) {
@@ -316,43 +316,43 @@ function parseRawHypotheses(
       }
       if (!isValidFactId(ref)) return null;
     }
-    if (typeof obj['reasoning'] !== 'string') return null;
+    if (typeof obj.reasoning !== 'string') return null;
     if (
-      obj['confidence'] !== 'low' &&
-      obj['confidence'] !== 'medium' &&
-      obj['confidence'] !== 'high'
+      obj.confidence !== 'low' &&
+      obj.confidence !== 'medium' &&
+      obj.confidence !== 'high'
     ) {
       return null;
     }
-    if (typeof obj['uncertainty_notes'] !== 'string') return null;
+    if (typeof obj.uncertainty_notes !== 'string') return null;
     let rc: RawRequiresContext | undefined;
-    if (obj['requires_context'] !== undefined) {
-      const candidate = obj['requires_context'];
+    if (obj.requires_context !== undefined) {
+      const candidate = obj.requires_context;
       if (typeof candidate !== 'object' || candidate === null) return null;
       const cr = candidate as Record<string, unknown>;
       const rcAllowed = new Set(['justification', 'args']);
       for (const k of Object.keys(cr)) {
         if (!rcAllowed.has(k)) return null;
       }
-      if (typeof cr['justification'] !== 'string') return null;
-      if (!isValidContextRequestArgs(cr['args'])) return null;
+      if (typeof cr.justification !== 'string') return null;
+      if (!isValidContextRequestArgs(cr.args)) return null;
       rc = {
-        justification: cr['justification'],
-        args: cr['args'] as ContextRequest['args'],
+        justification: cr.justification,
+        args: cr.args,
       };
     }
     out.push({
-      ...(typeof obj['proposed_control_id'] === 'string'
-        ? { proposed_control_id: obj['proposed_control_id'] }
+      ...(typeof obj.proposed_control_id === 'string'
+        ? { proposed_control_id: obj.proposed_control_id }
         : {}),
-      ...(obj['proposed_finding_type'] === 'likely_issue' ||
-      obj['proposed_finding_type'] === 'informational'
-        ? { proposed_finding_type: obj['proposed_finding_type'] }
+      ...(obj.proposed_finding_type === 'likely_issue' ||
+      obj.proposed_finding_type === 'informational'
+        ? { proposed_finding_type: obj.proposed_finding_type }
         : {}),
-      evidence_refs: obj['evidence_refs'] as readonly { readonly fact_id: string }[],
-      reasoning: obj['reasoning'],
-      confidence: obj['confidence'],
-      uncertainty_notes: obj['uncertainty_notes'],
+      evidence_refs: obj.evidence_refs as readonly { readonly fact_id: string }[],
+      reasoning: obj.reasoning,
+      confidence: obj.confidence,
+      uncertainty_notes: obj.uncertainty_notes,
       ...(rc !== undefined ? { requires_context: rc } : {}),
     });
   }
@@ -472,15 +472,15 @@ export async function runAiInference(
           hypothesis_id: hypId,
           source: 'ai_inference',
           ...(r.proposed_control_id !== undefined
-            ? { proposed_control_id: redactSecrets(r.proposed_control_id) as string }
+            ? { proposed_control_id: redactSecrets(r.proposed_control_id) }
             : {}),
           ...(r.proposed_finding_type !== undefined
             ? { proposed_finding_type: r.proposed_finding_type }
             : {}),
           evidence_refs: r.evidence_refs,
-          reasoning: redactSecrets(r.reasoning) as string,
+          reasoning: redactSecrets(r.reasoning),
           confidence: r.confidence,
-          uncertainty_notes: redactSecrets(r.uncertainty_notes) as string,
+          uncertainty_notes: redactSecrets(r.uncertainty_notes),
           model_id: modelId,
           prompt_fingerprint_sha256: promptFingerprint,
           ...(cr !== undefined ? { requires_context: cr } : {}),

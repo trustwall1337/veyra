@@ -98,7 +98,7 @@ export interface AnthropicSdkLike {
  * SDK returns a superset; we only narrow to what's needed.
  */
 export interface AnthropicMessagesResponse {
-  readonly content: ReadonlyArray<AnthropicResponseBlock>;
+  readonly content: readonly AnthropicResponseBlock[];
   readonly stop_reason: string | null;
   readonly usage: {
     readonly input_tokens: number | null;
@@ -227,7 +227,7 @@ function validateAgainstSchema(
   pathPrefix = '',
 ): ValidationFailure[] {
   const failures: ValidationFailure[] = [];
-  const schemaType = schema['type'];
+  const schemaType = schema.type;
   if (schemaType === 'object') {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       failures.push({
@@ -237,8 +237,8 @@ function validateAgainstSchema(
       return failures;
     }
     const obj = value as Record<string, unknown>;
-    const required = Array.isArray(schema['required'])
-      ? (schema['required'] as readonly unknown[])
+    const required = Array.isArray(schema.required)
+      ? (schema.required as readonly unknown[])
       : [];
     for (const reqName of required) {
       if (typeof reqName === 'string' && !(reqName in obj)) {
@@ -249,10 +249,10 @@ function validateAgainstSchema(
       }
     }
     const properties =
-      schema['properties'] !== undefined &&
-      typeof schema['properties'] === 'object' &&
-      schema['properties'] !== null
-        ? (schema['properties'] as Record<string, Record<string, unknown>>)
+      schema.properties !== undefined &&
+      typeof schema.properties === 'object' &&
+      schema.properties !== null
+        ? (schema.properties as Record<string, Record<string, unknown>>)
         : {};
     for (const [key, subSchema] of Object.entries(properties)) {
       if (key in obj) {
@@ -293,7 +293,7 @@ function validateAgainstSchema(
     // Without this, `{ type: 'array', items: { type: 'string' } }`
     // would accept `[1, 2, 3]` — the most common Phase 1 false
     // positive once AI Inference emits Hypothesis schemas.
-    const items = schema['items'];
+    const items = schema.items;
     if (
       items !== undefined &&
       typeof items === 'object' &&
@@ -352,12 +352,12 @@ function buildSdkRequest(
     max_tokens: request.max_output_tokens,
     messages: request.messages.map((m) => ({
       role: m.role,
-      content: m.content as string,
+      content: m.content,
     })),
   };
 
   if (request.system !== undefined) {
-    sdkRequest['system'] = [
+    sdkRequest.system = [
       {
         type: 'text',
         text: request.system as string,
@@ -367,7 +367,7 @@ function buildSdkRequest(
   }
 
   if (request.response_schema !== undefined) {
-    sdkRequest['tools'] = [
+    sdkRequest.tools = [
       {
         name: STRUCTURED_OUTPUT_TOOL_NAME,
         description:
@@ -375,7 +375,7 @@ function buildSdkRequest(
         input_schema: request.response_schema,
       },
     ];
-    sdkRequest['tool_choice'] = {
+    sdkRequest.tool_choice = {
       type: 'tool',
       name: STRUCTURED_OUTPUT_TOOL_NAME,
     };

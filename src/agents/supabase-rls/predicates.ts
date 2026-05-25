@@ -162,7 +162,7 @@ function unpackBucketFact(fact: ScanFact): BucketFact | null {
 
 function looksOpen(expr: string | undefined): boolean {
   return (
-    expr !== undefined && expr.replace(/\s+/g, ' ').trim().toLowerCase() === 'true'
+    expr?.replace(/\s+/g, ' ').trim().toLowerCase() === 'true'
   );
 }
 

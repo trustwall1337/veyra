@@ -53,7 +53,7 @@ export type SupabaseClientError = PolicyViolationError | SupabaseTransportError;
 const RESERVED_KEYS = new Set(['project_ref', 'read_only']);
 
 function redactResponse(value: unknown): unknown {
-  if (typeof value === 'string') return redactSecrets(value) as string;
+  if (typeof value === 'string') return redactSecrets(value);
   if (Array.isArray(value)) return value.map(redactResponse);
   if (typeof value === 'object' && value !== null) {
     const out: Record<string, unknown> = {};

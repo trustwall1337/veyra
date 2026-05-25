@@ -37,7 +37,7 @@ interface TemplateEntry {
 
 const TEMPLATES: ReadonlyMap<string, TemplateEntry> = new Map<string, TemplateEntry>([
   [
-    TEMPLATE_PROJECT_OVERVIEW as string,
+    TEMPLATE_PROJECT_OVERVIEW,
     {
       id: TEMPLATE_PROJECT_OVERVIEW,
       canonical_text:
@@ -45,7 +45,7 @@ const TEMPLATES: ReadonlyMap<string, TemplateEntry> = new Map<string, TemplateEn
     },
   ],
   [
-    TEMPLATE_USER_FLOWS as string,
+    TEMPLATE_USER_FLOWS,
     {
       id: TEMPLATE_USER_FLOWS,
       canonical_text:
@@ -53,7 +53,7 @@ const TEMPLATES: ReadonlyMap<string, TemplateEntry> = new Map<string, TemplateEn
     },
   ],
   [
-    TEMPLATE_DATA_HANDLING as string,
+    TEMPLATE_DATA_HANDLING,
     {
       id: TEMPLATE_DATA_HANDLING,
       canonical_text:
@@ -61,7 +61,7 @@ const TEMPLATES: ReadonlyMap<string, TemplateEntry> = new Map<string, TemplateEn
     },
   ],
   [
-    TEMPLATE_AUTH_MODEL as string,
+    TEMPLATE_AUTH_MODEL,
     {
       id: TEMPLATE_AUTH_MODEL,
       canonical_text:
@@ -75,7 +75,7 @@ export function isAllowedTemplate(id: string): id is string {
 }
 
 export function canonicalTextFor(id: PromptTemplateId): string | undefined {
-  return TEMPLATES.get(id as string)?.canonical_text;
+  return TEMPLATES.get(id)?.canonical_text;
 }
 
 export function listAllowedTemplates(): readonly PromptTemplateId[] {

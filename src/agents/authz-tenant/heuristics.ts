@@ -85,7 +85,7 @@ export function detectAuthzIssues(
       if (/\.eq\(\s*['"`](?:tenant_id|user_id|workspace_id|org_id)['"`]/i.test(window)) {
         continue;
       }
-      const fullMatch = `${m[0]}`;
+      const fullMatch = m[0];
       out.push({
         kind: 'cc-11-3',
         filePath,

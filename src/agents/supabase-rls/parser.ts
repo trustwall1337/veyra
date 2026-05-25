@@ -109,8 +109,8 @@ export function parseSchemaSql(sql: string): ParsedSchema {
       continue;
     }
 
-    const createMatch = stmt.text.match(CREATE_TABLE_RE);
-    if (createMatch !== null && createMatch[1] !== undefined && createMatch[2] !== undefined) {
+    const createMatch = CREATE_TABLE_RE.exec(stmt.text);
+    if (createMatch?.[1] !== undefined && createMatch[2] !== undefined) {
       const schema = createMatch[1];
       const name = createMatch[2];
       const key = `${schema}.${name}`;
@@ -127,8 +127,8 @@ export function parseSchemaSql(sql: string): ParsedSchema {
       continue;
     }
 
-    const alterMatch = stmt.text.match(ALTER_TABLE_RLS_RE);
-    if (alterMatch !== null && alterMatch[1] !== undefined && alterMatch[2] !== undefined) {
+    const alterMatch = ALTER_TABLE_RLS_RE.exec(stmt.text);
+    if (alterMatch?.[1] !== undefined && alterMatch[2] !== undefined) {
       const key = `${alterMatch[1]}.${alterMatch[2]}`;
       const existing = tablesByKey.get(key);
       if (existing !== undefined) {
@@ -144,19 +144,18 @@ export function parseSchemaSql(sql: string): ParsedSchema {
       continue;
     }
 
-    const policyMatch = stmt.text.match(CREATE_POLICY_RE);
+    const policyMatch = CREATE_POLICY_RE.exec(stmt.text);
     if (
-      policyMatch !== null &&
-      policyMatch[1] !== undefined &&
+      policyMatch?.[1] !== undefined &&
       policyMatch[2] !== undefined &&
       policyMatch[3] !== undefined
     ) {
-      const forMatch = stmt.text.match(POLICY_FOR_RE);
+      const forMatch = POLICY_FOR_RE.exec(stmt.text);
       const op = (forMatch?.[1]?.toUpperCase() as PolicyOp | undefined) ?? 'ALL';
-      const toMatch = stmt.text.match(POLICY_TO_RE);
+      const toMatch = POLICY_TO_RE.exec(stmt.text);
       const role = toMatch?.[1]?.trim();
-      const usingMatch = stmt.text.match(POLICY_USING_RE);
-      const wcMatch = stmt.text.match(POLICY_WITH_CHECK_RE);
+      const usingMatch = POLICY_USING_RE.exec(stmt.text);
+      const wcMatch = POLICY_WITH_CHECK_RE.exec(stmt.text);
       const policy: ParsedPolicy = {
         name: policyMatch[1],
         schema: policyMatch[2],
@@ -175,7 +174,7 @@ export function parseSchemaSql(sql: string): ParsedSchema {
       continue;
     }
 
-    const grantMatch = stmt.text.match(GRANT_RE);
+    const grantMatch = GRANT_RE.exec(stmt.text);
     if (grantMatch !== null) {
       const [, privs, schema, table, role] = grantMatch;
       if (

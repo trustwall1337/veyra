@@ -71,14 +71,14 @@ function deriveFallbackIntent(
 ): DeclaredIntent {
   const intent: Record<string, unknown> = {};
 
-  const pkg = evidence['package_json_digest'] as
+  const pkg = evidence.package_json_digest as
     | { name?: unknown; dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
     | undefined;
-  const framework = evidence['framework'] as string | undefined;
-  const routes = Array.isArray(evidence['routes'])
-    ? (evidence['routes'] as string[])
+  const framework = evidence.framework as string | undefined;
+  const routes = Array.isArray(evidence.routes)
+    ? (evidence.routes as string[])
     : [];
-  const tables = (evidence['supabase_schema'] as { tables?: string[] } | undefined)?.tables ?? [];
+  const tables = (evidence.supabase_schema as { tables?: string[] } | undefined)?.tables ?? [];
   const deps = {
     ...(pkg?.dependencies ?? {}),
     ...(pkg?.devDependencies ?? {}),
@@ -92,7 +92,7 @@ function deriveFallbackIntent(
       purposeBits.push(`built on ${framework}`);
     }
     if (purposeBits.length > 0) {
-      intent['purpose'] = {
+      intent.purpose = {
         value: purposeBits.join(' '),
         confidence: 'low',
         uncertainty_notes:
@@ -107,7 +107,7 @@ function deriveFallbackIntent(
     if (/dashboard|profile|account/i.test(r)) roles.add('user');
   }
   if (roles.size > 0) {
-    intent['user_roles'] = {
+    intent.user_roles = {
       value: Array.from(roles).sort(),
       confidence: 'low',
       uncertainty_notes:
@@ -125,7 +125,7 @@ function deriveFallbackIntent(
   }
   if ('stripe' in deps || '@stripe/stripe-js' in deps) dataKinds.add('payment');
   if (dataKinds.size > 0) {
-    intent['data_kinds'] = {
+    intent.data_kinds = {
       value: Array.from(dataKinds).sort(),
       confidence: 'low',
       uncertainty_notes:
@@ -134,7 +134,7 @@ function deriveFallbackIntent(
   }
 
   if ('@supabase/supabase-js' in deps) {
-    intent['auth_model'] = {
+    intent.auth_model = {
       value: 'Supabase Auth (inferred from dependency only — not AI-inferred)',
       confidence: 'low',
       uncertainty_notes:
@@ -142,7 +142,7 @@ function deriveFallbackIntent(
     };
   }
 
-  return intent as DeclaredIntent;
+  return intent;
 }
 
 export async function buildDeclaredContext(
@@ -243,7 +243,7 @@ export async function buildDeclaredContext(
         ),
       );
     }
-    declaredIntent = aiArtifact.declared_intent as DeclaredIntent;
+    declaredIntent = aiArtifact.declared_intent;
     sources.push({
       kind: 'ai_declared_intent',
       path: options.aiIntentArtifactPath,

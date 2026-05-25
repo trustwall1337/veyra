@@ -642,7 +642,7 @@ class ContextPolicyEvaluatorImpl implements ContextPolicyEvaluator {
       this.#log(request, 'denied', cap.kind);
       return err(cap);
     }
-    if (!ALLOWED_TEMPLATE_IDS.includes(request.args.template_id as string)) {
+    if (!ALLOWED_TEMPLATE_IDS.includes(request.args.template_id)) {
       const e = denyError(
         'unknown_template_id',
         `send_message_template id "${request.args.template_id as string}" is not one of the four allowed templates`,

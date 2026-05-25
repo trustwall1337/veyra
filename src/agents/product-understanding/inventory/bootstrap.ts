@@ -281,7 +281,7 @@ function redactScriptMap(
 ): Readonly<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(scripts)) {
-    out[k] = redactSecrets(v) as string;
+    out[k] = redactSecrets(v);
   }
   return out;
 }
@@ -299,15 +299,15 @@ function detectFramework(
   pkg: PackageJsonDigest | undefined,
   sources: InventorySource[],
 ): DetectedFramework {
-  if (fileMap.some((f) => /^vite\.config\./.test(f))) {
+  if (fileMap.some((f) => f.startsWith("vite.config."))) {
     sources.push({ kind: 'framework_detection', description: 'detected: vite (vite.config.*)' });
     return 'vite';
   }
-  if (fileMap.some((f) => /^next\.config\./.test(f))) {
+  if (fileMap.some((f) => f.startsWith("next.config."))) {
     sources.push({ kind: 'framework_detection', description: 'detected: next (next.config.*)' });
     return 'next';
   }
-  if (fileMap.some((f) => /^remix\.config\./.test(f))) {
+  if (fileMap.some((f) => f.startsWith("remix.config."))) {
     sources.push({ kind: 'framework_detection', description: 'detected: remix (remix.config.*)' });
     return 'remix';
   }

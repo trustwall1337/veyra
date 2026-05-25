@@ -91,7 +91,7 @@ export function redactSecrets(input: string): SanitizedMessage {
 export function stripRawData(record: unknown): unknown {
   if (record === null || record === undefined) return record;
   if (typeof record === 'string') {
-    return redactSecrets(record) as string;
+    return redactSecrets(record);
   }
   if (typeof record === 'number' || typeof record === 'boolean') {
     return record;

@@ -92,7 +92,7 @@ export function checkSendMessageArgs(
       );
     }
   }
-  if (a['plan_mode'] !== true) {
+  if (a.plan_mode !== true) {
     return err(
       new PolicyViolationError(
         'send_message requires plan_mode: true',
@@ -101,7 +101,7 @@ export function checkSendMessageArgs(
       ),
     );
   }
-  if (typeof a['template_id'] !== 'string') {
+  if (typeof a.template_id !== 'string') {
     return err(
       new PolicyViolationError(
         'send_message requires a template_id (no free-form text)',
@@ -110,10 +110,10 @@ export function checkSendMessageArgs(
       ),
     );
   }
-  if (!isAllowedTemplate(a['template_id'])) {
+  if (!isAllowedTemplate(a.template_id)) {
     return err(
       new PolicyViolationError(
-        `send_message template_id "${a['template_id']}" is not in the allowed set`,
+        `send_message template_id "${a.template_id}" is not in the allowed set`,
         'read_code',
         LOVABLE_CONNECTOR_ID as string,
       ),
@@ -122,7 +122,7 @@ export function checkSendMessageArgs(
   // Retro-15 f4: slots are rejected for Phase 1. The four allowed
   // templates do not take slots. A future template adding slots must
   // declare its allowed slot keys + value schema and validate here.
-  if (a['slots'] !== undefined) {
+  if (a.slots !== undefined) {
     return err(
       new PolicyViolationError(
         'send_message: slots are not accepted in Phase 1 (no template registers slot keys)',
@@ -132,7 +132,7 @@ export function checkSendMessageArgs(
     );
   }
   return ok({
-    template_id: a['template_id'],
+    template_id: a.template_id,
     plan_mode: true,
   });
 }

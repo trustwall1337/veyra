@@ -25,10 +25,10 @@ const CANONICAL_NAMES: ReadonlySet<string> = new Set([
   'subscriptions',
 ]);
 
-const PATTERN_REGEXES: ReadonlyArray<{
+const PATTERN_REGEXES: readonly {
   readonly re: RegExp;
   readonly label: string;
-}> = [
+}[] = [
   { re: /_secrets$/i, label: '*_secrets' },
   { re: /_pii$/i, label: '*_pii' },
   { re: /_private$/i, label: '*_private' },

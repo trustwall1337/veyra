@@ -261,8 +261,8 @@ export function createScanOrchestrator(
       buildInput: InputBuilder<I> = () => ({}) as I,
     ): void {
       entries.push({
-        agent: agent as VeyraAgent<unknown, unknown>,
-        buildInput: buildInput as InputBuilder<unknown>,
+        agent: agent,
+        buildInput: buildInput,
       });
     },
     async run(
