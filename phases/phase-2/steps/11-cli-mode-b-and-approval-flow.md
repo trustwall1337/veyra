@@ -23,6 +23,7 @@ New flags:
 - `--ai-provider <name>` — `anthropic` (default) or `openai`
 - `--ai-model <id>` — model selection per `§10.6`
 - `--ai-cache-ttl <5m|1h>` — prompt-cache TTL per step 01 decision 3
+- `--ai-concern-threshold <low|medium|high>` — minimum confidence at which `AIConcern` entries render in the report (default `medium`). Entries below the threshold are recorded in `ai-concerns.json` for audit but do not appear in the rendered report. Setting `low` shows everything; setting `high` shows only high-confidence entries. This is the single visibility control — no separate hide-low flag.
 
 Parse-time rejections:
 - `--env production` + `--mode sandbox_active_validation` → reject
@@ -33,15 +34,17 @@ Parse-time rejections:
 - `--lovable-mcp` without `--lovable-project` → reject (Phase 1 rule preserved)
 
 Runtime behavior:
-- Interactive: prompt user to type `yes-i-understand-this-mutates-sandbox` BEFORE Synthesize begins. Refuses to proceed on any other input.
-- CI: read `--approval-file`; verify signature per step 01 decision 5; check that `scan_id_prefix` matches this scan; check `expires_at`; write a consumption-marker artifact; refuse reuse on a second scan.
+- **Interactive (ad-hoc, no `--ci`):** prompt user to type `yes-i-understand-this-mutates-sandbox` BEFORE Synthesize begins. Refuses to proceed on any other input.
+- **CI (`--ci --approval-file <path>`):** **NO interactive prompt.** Read the file, verify signature per step 01 decision 5, check `expires_at`, check `scope.project_ref` matches `--supabase-sandbox`, check the per-file scan counter (`<approval-file>.usage.json`) is below `scope.max_scans`, check the proposed plan's synthetic-record total against `scope.max_synthetic_records`. If everything passes: increment counter, append to consumption-marker artifact, proceed. If any check fails: exit non-zero with a structured error naming which gate rejected.
 - Build `ValidationPolicy` with the right `allowed_actions` for the requested mode.
+
+**Multi-scan approval semantics:** approval files now authorise multiple scans within a time + count window (see `PHASE_2_PLAN §11.1`). The `<approval-file>.usage.json` counter file lives next to the approval file. Scans against the same approval consume the counter. Rotating an approval = delete the counter file (or revoke the approval file).
 
 ## Done when
 
 - All argv-rejection tests fire green.
 - Interactive confirmation test: simulate `no` → scan aborts before Synthesize.
-- CI test: reuse approval file → second scan rejected; tampered signature → rejected; expired approval → rejected.
+- CI test: scan counter under cap → accepted; scan counter at cap → rejected with explicit "max_scans reached" message; tampered signature → rejected; expired approval → rejected; counter-file mismatch (signature vs counter) → rejected.
 - Mode A path unchanged: existing Phase 1 CLI tests still pass.
 - Service-role key never appears in `scan-actions.log` args fingerprints (key is read from env var; only the env-var NAME is in argv).
 

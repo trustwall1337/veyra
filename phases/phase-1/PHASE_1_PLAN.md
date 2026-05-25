@@ -54,6 +54,20 @@
 >   those connectors in Phase 1 — premature implementation remains
 >   forbidden per `CLAUDE.md`. The principle is about putting the seams
 >   in the right place.
+> - **AI-first architectural revision (2026-05-24).** A revision file at
+>   `phases/phase-1/REVISION_AI_SHAPE.md` reshapes the pipeline as seven
+>   layers (Observation → Inference → Assertion → Planning → Compilation
+>   → Execution) with AI in the inference and planning layers. It
+>   introduces four distinct artifact types — `ScanFact` (deterministic
+>   observation), `Hypothesis` (AI inference), `Finding` (deterministic
+>   assertion output), `AIConcern` (unasserted AI surfaced for human
+>   review). Read it before changing §3 (Step 4 AI Reasoning), §4 (agents),
+>   §5 (Finding model), §6 (Required + Not Required), §7 (Tasks). It is
+>   the authoritative source for the AI-first shape; sections below remain
+>   accurate for everything not contradicted by the revision. The revision
+>   also moves the `AiProvider` interface (previously Phase 2 step 04)
+>   into the Phase 1 revision deliverables, because Phase 1 now has two
+>   real AI agents (Product-Understanding, Inference).
 
 ---
 
@@ -377,11 +391,25 @@ Veyra-owned deterministic checks:
 - admin route without clear server-side role check
 - missing negative auth/RLS tests
 
-### Step 4: AI Security Reasoning — **deferred to Phase 2**
+### Step 4: AI Security Reasoning — **superseded by the AI-first revision**
 
-The original Phase 1 plan placed AI Security Reasoning here. Execution
-planning moved it to Phase 2 (`phases/phase-2/PHASE_2_PLAN.md §10`) for three
-reasons:
+The original Phase 1 plan placed AI Security Reasoning here as a flat
+"explanation layer." The 2026-05-24 AI-first revision
+(`phases/phase-1/REVISION_AI_SHAPE.md`) supersedes that framing:
+
+- AI now runs in Phase 1 across two agents: **AI Product-Understanding**
+  (enriches `declared_intent`) and **AI Inference** (produces `Hypothesis`
+  records from `ScanFact[]` + declared context).
+- AI continues to run in Phase 2 across **AI Security Planner** (proposes
+  scan plans from the closed catalog) and **`ai-explainer`** (explanations
+  + narrative + suggested-test refinement).
+- The `AiProvider` interface + Anthropic adapter (previously Phase 2
+  deliverable) move into the Phase 1 revision.
+- `--no-ai` continues to produce a complete deterministic report.
+
+The constraint set below remains the binding floor for AI in any phase.
+The execution planning moved AI deeper into the pipeline, not later in
+the calendar:
 
 1. Phase 1's deterministic backbone (scanners + schema parser + heuristics)
    must produce a useful report without an AI provider key. Coupling AI into
@@ -711,6 +739,12 @@ Controls:
 ---
 
 ## 5. Finding Model
+
+> **Alignment note.** The AI-first revision (`phases/phase-1/REVISION_AI_SHAPE.md §3`)
+> introduces three sibling artifact types alongside `Finding`: `ScanFact`,
+> `Hypothesis`, `AIConcern`. The enums below remain canonical for `Finding`;
+> the sibling shapes are defined in the revision. `Finding.evidence_refs`
+> is fact-only; AI commentary attaches via `Finding.supporting_hypothesis_refs`.
 
 ```yaml
 finding_type:

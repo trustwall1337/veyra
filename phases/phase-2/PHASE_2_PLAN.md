@@ -7,6 +7,23 @@ Author: planner pass 2026-05-24, building on `phase-1/PHASE_1_PLAN.md` and the v
 
 ---
 
+> **Alignment note (2026-05-24 AI-first revision).** The AI-first architectural
+> revision lives at `phases/phase-1/REVISION_AI_SHAPE.md`. It moves the
+> `AiProvider` interface + Anthropic adapter into Phase 1 (because Phase 1
+> now has two AI agents). Phase 2 steps 04 and 05 below remain accurate
+> for OpenAI fallback work; step 04's "AI provider interface" content
+> is now Phase 1 work and step 04 narrows to "OpenAI fallback adapter."
+>
+> Phase 2 also gains two new components per the revision: **AI Security
+> Planner Agent** (reads the closed catalog, proposes scan plans) and
+> **`ActiveValidationPolicyCompiler`** (deterministic gate that validates
+> the proposed plan before sandbox execution). Both land AFTER Phase 2
+> step 07 (catalog) ships.
+>
+> Reports become three-tier: `Finding` (deterministic), `AIConcern`
+> (AI-suggested, unasserted), `ActiveValidationResult` (sandbox-proven).
+> See revision file §11.
+
 ## §0 Status and Scope
 
 Phase 2 turns Veyra from a read-only evidence reporter into a tool that can **prove** controls in sandbox environments and **explain** findings with AI assistance. It is the first phase in which Veyra is permitted to mutate state — and only Veyra-created state, only in non-production environments, only with explicit user opt-in, and always with verifiable cleanup.
@@ -166,6 +183,13 @@ Every Phase 2 scan in Mode B passes through five phases in order. Each phase has
 
 Phase 1's seven agents continue to run on every scan. Phase 2 adds three new agents and extends three existing ones.
 
+**Per the AI-first revision** (`phases/phase-1/REVISION_AI_SHAPE.md`), Phase 2 also gains:
+
+- **AI Security Planner Agent** (`src/agents/ai-security-planner/`) — reads `findings.json` + `declared-context.json` + the closed catalog (Phase 2 step 07), proposes a scan plan. Cannot invent test types. Cannot delete from the mandatory baseline. Land AFTER step 07.
+- **`ActiveValidationPolicyCompiler`** (`src/core/policy/active-validation-policy-compiler.ts`) — deterministic gate that validates the AI-proposed scan plan against `ValidationPolicy`, injects missing baseline entries, rejects unsafe parameters. Sits between AI Security Planner and Sandbox Runner. Distinct from Phase 1's `ContextPolicyEvaluator` (which gates AI's `ContextRequest`s, not executable plans).
+
+The AI Security Planner does NOT replace the deterministic `TestPlanEntry` emission from Phase 1 agents (steps 10a–10e in Phase 2). The deterministic emission remains the floor; AI proposes priorities, parameters, and additional targets within the closed catalog.
+
 ### 4.0 Runtime updates
 
 - The orchestrator becomes a **two-phase scan runner**: setup phase (Plan + Synthesize) and execution phase (Exercise + Cleanup + Prove). Cleanup is guaranteed via try-finally even on agent crash inside Exercise.
@@ -204,6 +228,14 @@ Phase 1's seven agents continue to run on every scan. Phase 2 adds three new age
 ---
 
 ## §5 Finding Model Extensions
+
+> **Alignment note.** The AI-first revision (`phases/phase-1/REVISION_AI_SHAPE.md §3`)
+> reshaped the artifact landscape: `ScanFact`, `Hypothesis`, `Finding`,
+> `AIConcern` are four separate types with distinct producers. The
+> evidence-kind discriminated union below remains the way `Finding.evidence`
+> describes WHERE the deterministic evidence came from; it is NOT the
+> artifact-type axis. AI now reports its surfaces as `AIConcern` records in
+> a separate report tier — see revision §11.
 
 ### 5.1 Evidence kinds wired in Phase 2
 
@@ -394,22 +426,57 @@ Before any AI call:
 
 ## §11 Trust Model Updates
 
-### 11.1 Approval flow
+### 11.1 Approval flow (multi-scan token + CI bypass)
 
-- Interactive scans: typed confirmation (`yes-i-understand-this-mutates-sandbox`) before Synthesize begins.
-- CI scans: signed approval file consumed via `--ci --approval-file <path>`. File is a JSON document with `{ scan_id_prefix, granted_at, granted_by, scope: { project_ref, max_synthetic_records, expires_at } }`. Approval file is single-use — Veyra writes a consumption marker to the artifact store and refuses to reuse the same file.
-- The approval scope is enforced at plan time: if the plan exceeds the approved `max_synthetic_records`, scan aborts before Synthesize.
+**Goal: one human sign-off, many automated scans within scope.** The interactive prompt remains for ad-hoc runs but is bypassed entirely in CI.
+
+- **Interactive scans (ad-hoc, no `--ci`):** typed confirmation (`yes-i-understand-this-mutates-sandbox`) before Synthesize begins. This path remains for developers running from a terminal without an approval file.
+- **CI scans (`--ci --approval-file <path>`):** **no interactive prompt.** Veyra reads the signed approval file; if it is valid + in scope + unexpired + under the scan budget, the scan proceeds. The file is the entire approval surface.
+
+**Approval-file shape:**
+
+```jsonc
+{
+  "approval_id": "uuid",
+  "granted_at": "ISO8601",
+  "granted_by": "email-or-identifier",
+  "expires_at": "ISO8601",           // default: granted_at + 7 days
+  "scope": {
+    "project_ref": "supabase-project-ref",
+    "max_synthetic_records": 1000,
+    "max_scans": 50                    // default: 50 scans across the window
+  },
+  "signature": "<detached signature; format settled in step 01 decision 5>"
+}
+```
+
+**Multi-scan semantics:**
+
+- Each scan increments a counter stored next to the approval file (`<approval-file>.usage.json`, append-only).
+- Scan is rejected when: `expires_at` has passed, `max_scans` is reached, or `max_synthetic_records` would be exceeded by this scan's plan.
+- The counter file is hashed into the consumption marker artifact in the scan output for audit.
+- Rotating an approval file (revoking before expiry) is done by deleting the counter file; the next scan recomputes (and rejects if the file was tampered with — signature mismatch).
+
+**Why this is the right shape:**
+
+- The 80% case (CI cron scanning the same sandbox project weekly) becomes "human signs once a week, automation runs many times."
+- The compromise surface is bounded by the `scope` block — a stolen approval file authorises only the named project, with a hard cap on synthetic records and scan count.
+- The interactive path stays for first-time / one-off use, so the friction is on humans who can absorb it.
+
+The approval scope is enforced **at plan time**: if the proposed plan exceeds `max_synthetic_records` (across this scan's `TestPlanEntry[]`), the scan aborts before Synthesize. Same for `max_scans`.
 
 ### 11.2 Synthetic data namespace
 
 - All synthetic resources tagged with `veyra_scan_id` AND a fixed prefix (`veyra-synth-<scan_id>-`) on names where applicable.
 - `synthetic_data_manager` refuses to operate against a project whose existing data already contains rows with that prefix (assumed orphan from a prior failed scan — operator must clean manually first).
 
-### 11.3 Cleanup proof
+### 11.3 Cleanup proof (with bounded auto-retry)
 
 - Cleanup is run unconditionally after Exercise, even on crash.
 - Cleanup proof includes per-resource verification: list of expected deletions, list of actual deletions, residual count by resource type.
-- Residual_count > 0 results in: non-zero exit, residual report file, NO `proven_in_sandbox` claims, AND a `confirmed_issue + fix_before_launch` finding flagging the failed cleanup.
+- **Bounded auto-retry on failure.** When verification finds `residual_count > 0`, the manager re-attempts cleanup of the residual UUIDs up to **3 times with exponential backoff** (1s, 4s, 16s). Most cleanup failures are transient (network blip, Supabase rate limit, partial-delete races). Auto-retry preserves the safety floor without bothering a human for routine flakiness. Every attempt is logged to `scan-actions.log`.
+- If `residual_count > 0` **after** all retries: non-zero exit, residual report file, NO `proven_in_sandbox` claims, AND a `confirmed_issue + fix_before_launch` finding flagging the failed cleanup. This path requires human investigation; Veyra does not attempt unbounded retries because "delete harder" is exactly what a malicious tool would do.
+- The retry policy is hard-coded (3 attempts, 1/4/16-second backoff). Not exposed as a flag — surface area is small, and any further automation belongs in the human-investigation phase.
 
 ### 11.4 Auditability
 
@@ -424,7 +491,7 @@ Before any AI call:
 | Risk | Mitigation |
 |---|---|
 | Synthetic data leaks into production. | `--env production` rejected at parse time for Mode B. `project_ref` for sandbox must differ from any other Supabase reference in the scan. Approval file scope binds to a specific `project_ref`. |
-| Cleanup failure leaves residual records. | Cleanup is verified by residual_count. Failure produces non-zero exit, residual report, NO proven claims, AND a `confirmed_issue` finding. Manual cleanup procedure documented in `docs/synthetic-data-and-cleanup.md`. |
+| Cleanup failure leaves residual records. | Bounded auto-retry (3 attempts, 1/4/16-second backoff) catches transient flakiness without human ceremony. If retries exhaust: non-zero exit, residual report, NO proven claims, AND a `confirmed_issue` finding. Manual cleanup procedure documented in `docs/synthetic-data-and-cleanup.md`. |
 | Service-role key leakage. | Key accepted only via env var name, never on command line. Key never appears in artifacts, logs, AI prompts, or reports. Args fingerprints are SHA-256, not raw. |
 | AI hallucination of vulnerabilities. | Classification stays deterministic. AI output is enrichment, not authority. Confidence required on every output. Reporter renders AI section distinctly. `--no-ai` produces a complete report. |
 | AI prompt injection from project content. | Sanitization: project content is treated as data, never as instructions. Structured-output mode (Anthropic tool_use or OpenAI response_format) so the model returns typed JSON, not free-form text that could include directives. |

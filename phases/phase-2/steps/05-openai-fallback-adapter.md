@@ -1,38 +1,38 @@
-# Step 05 — OpenAI fallback adapter
+# Step 05 — Superseded by step 04 (post AI-first revision)
 
-**Status:** not started
-**Maps to:** `PHASE_2_PLAN §7 Task 3` (part B), §1.4, §10.6
-**Produces:** `src/ai/openai.ts` behind the same `AiProvider` interface from step 04
-**Depends on:** 04
-**Executed by:** plain coding pass
-**Verification:** same sanitization + structured-output tests as step 04; provider selectable via `--ai-provider openai` once step 11 lands
+> **This step is superseded.** After the AI-first revision (2026-05-24)
+> narrowed Phase 2 step 04 from "AI provider interface + Anthropic
+> adapter" to "OpenAI fallback adapter only" (because the interface and
+> the Anthropic adapter moved to Phase 1 revision steps 02c and 02d
+> respectively), step 04 now owns the OpenAI fallback work that this
+> step originally specified.
+>
+> No new code lands in this step. File retained for traceability so
+> existing `phases/phase-2/steps/README.md` references and any older
+> manifests do not break.
+>
+> **Go to** `phases/phase-2/steps/04-ai-provider-interface-and-anthropic-adapter.md`
+> for the active OpenAI fallback adapter step.
 
-## Goal
+**Status:** superseded
+**Supersedes:** none
+**Superseded by:** `04-ai-provider-interface-and-anthropic-adapter.md`
+**Produces:** nothing — pointer only
+**Depends on:** n/a
+**Executed by:** n/a
+**Verification:** n/a
 
-Second `AiProvider` implementation. OpenAI's `response_format: { type: 'json_schema', strict: true }` gives token-level grammar enforcement equivalent to Anthropic's structured outputs. Phase 2 ships both adapters; one provider per scan (per `§1.4`).
+## Why superseded
 
-## What lands
+Before the AI-first revision, Phase 2 owned both the `AiProvider` interface and the Anthropic adapter (as one step 04) plus the OpenAI fallback (this step). The revision moved `AiProvider` and Anthropic into Phase 1 deliverables because Phase 1 now has two AI agents (AI Product-Understanding and AI Inference) that need a working provider before Phase 2 even starts. That left step 04 with only the OpenAI fallback work, which is exactly what this step originally specified — so step 04 absorbed the content and this step retires.
 
-- `src/ai/openai.ts` — wraps the `openai` SDK. Default model `gpt-4o-mini` for cost-equivalence with `claude-sonnet-4-6`; `gpt-4o` for quality-equivalence (selectable via `--ai-model`).
-- Same `AiProvider` contract as the Anthropic adapter — `Result<AiResponse, AiProviderError>` shape identical.
-- OpenAI does not have provider-side prompt caching with the same shape as Anthropic. The adapter sets `cache_read_input_tokens: 0` and notes in `uncertainty_notes` that caching isn't equivalent.
-- Same `scan-actions.log` entries as step 04.
+## What you would do if you saw a future request to revive this step
 
-## Done when
-
-- Adapter passes the same test suite step 04 runs: sanitization round-trip, schema-violation rejection, `--no-ai` short-circuit before import.
-- `--ai-provider openai` selects this adapter at runtime (verified in step 11 CLI tests).
-- Identical `Result<AiEnrichment, AiProviderError>` shape returned from both adapters on the same input.
-
-## Guardrails
-
-- Per `§10.2`: no tool-use loops. Chat completions with structured output only.
-- API key accepted via env var only (`OPENAI_API_KEY`). Never on argv.
-- Do not introduce abstractions that only OpenAI needs into `AiProvider` shared types. OpenAI-specific config lives inside this file.
-- Per `§10.6`: model id is recorded on every output. OpenAI model versions roll forward — the report shows the version that was used at scan time.
+Re-check whether Phase 1 revision steps 02c (`AiProvider` interface + sanitization) and 02d (Anthropic adapter) actually landed and ship the interface correctly. If they did, this step stays superseded. If they did not, the right fix is to repair the Phase 1 steps, not revive this one.
 
 ## References
 
-- `PHASE_2_PLAN.md` §1.4 (OpenAI permitted/forbidden), §10.6 (model choice)
-- OpenAI structured outputs (`response_format: { type: 'json_schema', strict: true }`)
-- Step 04 `AiProvider` interface
+- `phases/phase-2/steps/04-ai-provider-interface-and-anthropic-adapter.md` (the active OpenAI fallback step)
+- `phases/phase-1/steps/02c-ai-provider-types-and-sanitization.md` (where the interface lives)
+- `phases/phase-1/steps/02d-anthropic-adapter.md` (where Anthropic lives)
+- `phases/phase-1/REVISION_AI_SHAPE.md` §14 Q5 (settles AI provider ownership)

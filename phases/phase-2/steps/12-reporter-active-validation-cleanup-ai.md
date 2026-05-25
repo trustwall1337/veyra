@@ -16,6 +16,11 @@ Replace the Phase 1 step 13 placeholders. Render `active_validation` and `cleanu
 - Replace `src/reporters/markdown/evidence/active-validation.ts` placeholder with full renderer: per-test outcome, sanitized test parameters (synthetic identity ids only — no JWTs, no service-role key), assertion details, duration.
 - Replace `src/reporters/markdown/evidence/cleanup-proof.ts` placeholder: residual count, deleted count, per-resource log summary. Heading: "Sandbox cleanup."
 - New `src/reporters/markdown/sections/ai-enrichments.ts`: renders `ai-enrichments.json` distinctly from deterministic findings. Low-confidence outputs under a distinct "AI-suggested (low confidence)" subheading per `§10.5`.
+- New `src/reporters/markdown/sections/ai-concerns.ts`: renders `ai-concerns.json` (the `AIConcern` artifact from the AI-first revision). **Visibility is governed by a single CLI flag**, `--ai-concern-threshold low|medium|high` (default `medium`):
+  - `confidence >= threshold` → rendered under the heading "AI-suggested areas for human review."
+  - `confidence < threshold` → recorded in `ai-concerns.json` (audit trail) but NOT rendered. Setting `low` shows everything; setting `high` shows only high-confidence entries.
+  - When `--no-ai` is set, the entire AIConcerns section is omitted; a one-line note in the Sources section says "AI was disabled for this scan; AIConcerns not produced."
+  - There is no separate hide-low flag — the threshold is the only visibility control.
 - Extend `src/reporters/markdown/sections/sources.ts` (Phase 1 step 13) to render `scan-actions.log` summary: counts per action type (ai_call, supabase_admin_call, scanner_invocation, mcp_call, executor_action), per-scanner success/missing, MCP connectors enabled, `ValidationPolicy` summary, AI model id + version, cache hit ratio.
 - New allowed-claims vocabulary entries: "actively tested," "proven in sandbox under scenario X," "AI-suggested explanation; needs human review." Update `src/reporters/markdown/strings.ts`.
 - Snapshot serializers for non-deterministic fields: `scan_id` (UUID), timestamps, `request_fingerprint` (SHA-256), `synthetic_data_refs` (UUIDs). Scrub these from snapshot output so Mode B reports are diff-stable.

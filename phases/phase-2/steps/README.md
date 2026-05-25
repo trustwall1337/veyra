@@ -47,8 +47,8 @@ User decisions pending:
 | 01 | `01-lock-phase2-blocking-decisions.md` | Lock Phase 2 blocking decisions |
 | 02 | `02-land-deferred-types-and-action-executor.md` | Phase 2 deferred types + `ActionExecutor` interface |
 | 03 | `03-sandbox-executor-and-policy-wiring.md` | `SandboxExecutor` + policy wiring for Mode B |
-| 04 | `04-ai-provider-interface-and-anthropic-adapter.md` | AI provider interface + Anthropic adapter |
-| 05 | `05-openai-fallback-adapter.md` | OpenAI fallback adapter |
+| 04 | `04-ai-provider-interface-and-anthropic-adapter.md` | **Narrowed** to OpenAI fallback adapter only (AiProvider interface + Anthropic adapter moved to Phase 1 revision 02c + 02d) |
+| 05 | `05-openai-fallback-adapter.md` | **Superseded** by step 04 after the AI-first revision narrowed 04's scope. File retained as a pointer; no new code lands here. |
 | 06 | `06-synthetic-data-manager-agent.md` | `synthetic-data-manager` agent (Synthesize + Cleanup) |
 | 07 | `07-negative-test-catalog.md` | Negative-test catalog keyed by `control_id` |
 | 08 | `08-sandbox-runner-agent.md` | `sandbox-runner` agent (executes test plan) |

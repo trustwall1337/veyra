@@ -1,25 +1,42 @@
 # Veyra — Product Goal, Phases, and Execution Plan
 
-> **Alignment notes (2026-05-24).** This document is the long-form product
-> vision. Several sections have been updated to match decisions made during
-> execution planning for Phase 1 + Phase 2. Where the two diverge, the
-> phase-specific plans take precedence:
+> **Alignment notes (2026-05-24, with AI-first revision update).** This
+> document is the long-form product vision. Several sections have been
+> updated to match decisions made during execution planning. Where this
+> document and the phase docs diverge, the phase-specific plans take
+> precedence:
 >
 > - `phases/phase-1/PHASE_1_PLAN.md` for Phase 1 execution constraints.
-> - `phases/phase-2/PHASE_2_PLAN.md` for sandbox active validation and AI.
+> - `phases/phase-2/PHASE_2_PLAN.md` for sandbox active validation.
+> - **`phases/phase-1/REVISION_AI_SHAPE.md` for the AI-first architecture.**
+>   This revision reshapes the whole pipeline as seven layers (Observation
+>   → Inference → Assertion → Planning → Compilation → Execution) with AI
+>   in the inference and planning layers, and four distinct artifact types
+>   (`ScanFact` / `Hypothesis` / `Finding` / `AIConcern`) with sharp
+>   boundaries between them. Read it before changing §12, §13, §14, or §17
+>   in this document.
 >
 > Specific alignment points worth flagging:
 >
-> - **§10 Finding Model.** The `reproducibility` and `blast_radius` enums
->   here have been updated to match the canonical Phase 1 `§5` enums. Earlier
->   drafts used `dynamic` and `compliance_evidence`; those values are out.
-> - **§12 AI Responsibilities.** AI is plumbed in Phase 1 but lands in
->   Phase 2 (`phases/phase-2/PHASE_2_PLAN.md §10`). Phase 1 ships only the
->   provider adapter interface.
+> - **§10 Finding Model.** `Finding` is now one of four artifact types.
+>   The other three are defined in the revision file (`ScanFact`,
+>   `Hypothesis`, `AIConcern`). `Finding` is produced ONLY by deterministic
+>   assertion predicates; AI never produces a `Finding`.
+> - **§12 AI Responsibilities.** AI is the **inference and planning
+>   layer**, not just an explainer. AI produces `Hypothesis` records
+>   (assertion layer converts) and proposes scan plans (compiler gates).
+>   See revision file §3, §7.
+> - **§13 MVP Architecture.** The seven-layer model in the revision file
+>   replaces the original two-stage (scanners → agents) shape. AI runs in
+>   layers 3 and 5; deterministic code in 1, 2, 4, 6, 7.
+> - **§14 Scanner Responsibilities.** Scanners now emit `ScanFact[]`,
+>   not `Finding[]`. Finding creation moves entirely to the assertion
+>   layer.
 > - **§17 Phase Roadmap.** Phase 2's signature capability is sandbox active
->   validation + AI explanations. The existing Phase 2 tactical items
->   (onboarding, GitHub Action, scan history) ship alongside.
-> - **§23 Differentiation.** Adds active validation as a non-scanner moat.
+>   validation + AI Security Planner + AI Inference + AI Product-Understanding.
+>   The existing Phase 2 tactical items ship alongside.
+> - **§23 Differentiation.** Sandbox active validation and AI-as-inference-layer
+>   are the two non-scanner moats.
 
 ---
 
@@ -678,6 +695,19 @@ Veyra must distinguish between confirmed problems and missing evidence.
 
 This is critical for trust.
 
+> **Alignment note (2026-05-24 AI-first revision).** Under the revised
+> architecture (`phases/phase-1/REVISION_AI_SHAPE.md §3`), `Finding` is now
+> one of **four** artifact types with distinct producers:
+>
+> - `ScanFact` (deterministic observation; produced by scanners and parsers).
+> - `Hypothesis` (AI inference; produced by AI Inference agent).
+> - `Finding` (deterministic assertion output; produced ONLY by assertion-layer predicates against facts).
+> - `AIConcern` (AI surfaces that no predicate confirmed; rendered in a distinct report tier).
+>
+> The enums below remain accurate for `Finding`. The other three artifact types
+> have their own shapes in the revision file. AI never produces a `Finding`
+> directly.
+
 ### Finding types
 
 ```yaml
@@ -831,56 +861,99 @@ These are useful but should not be launch blockers until accuracy improves. They
 
 ## 12. AI Responsibilities
 
-AI should assist, not decide.
+AI is the **inference and planning layer**, not just an explainer.
+Deterministic code remains the evidence, assertion, execution, and safety
+layer. Full architecture in `phases/phase-1/REVISION_AI_SHAPE.md`.
 
-**Phasing:** Phase 1 ships only the AI provider adapter interface. No
-provider is wired in Phase 1. AI capability lands in Phase 2
-(`phases/phase-2/PHASE_2_PLAN.md §10`). The rules below apply across all
-phases that include AI.
+**Phasing:** AI lands across Phase 1 and Phase 2, not only Phase 2.
+Phase 1 introduces the AI Inference Agent and AI Product-Understanding
+Agent. Phase 2 adds the AI Security Planner Agent and the existing
+`ai-explainer`. `--no-ai` mode disables all AI layers and the product
+still ships with deterministic findings.
 
-### AI should do (Phase 2+)
+### AI does (each phase below)
 
-- explain findings in plain language
-- map findings to controls
-- summarize risk
-- refine suggested tests (the deterministic catalog generates the list;
-  AI rewrites for clarity using declared context)
-- suggest remediation options
-- interpret RLS policies
-- produce launch-readiness summaries
-- generate developer-friendly report text
-- help prioritize findings
+**Phase 1 inference:**
+- Read sanitized `ScanFact[]` + `declared-context.json`, produce
+  `Hypothesis` records (NOT Findings; see §10 + revision §3).
+- Request additional context via typed `ContextRequest` objects gated by
+  `ContextPolicyEvaluator` (deterministic).
+- Enrich `declared_intent` on `declared-context.json` (NOT
+  `observed_evidence` — deterministic inventory owns that).
 
-### AI should not do (any phase)
+**Phase 2 planning + explanation:**
+- Propose active-validation scan plans (priorities + parameters drawn from
+  the closed catalog only).
+- Explain findings in plain language; refine suggested tests; produce
+  control-card narrative; suggest remediation as guidance text (not
+  executable artifacts).
 
-- be the source of truth for findings
-- classify findings (`finding_type`, `evidence_strength`, `review_action`,
-  `blast_radius`, `readiness_status` are all deterministic)
-- approve launch
-- accept risk
-- exploit production systems
-- mutate data
-- change permissions
-- auto-merge fixes
-- hide uncertainty
-- claim compliance
-- create incidents automatically
-- generate executable artifacts (SQL, code, migrations, shell commands)
-- run tool-use loops that take state-changing actions
+### AI does NOT do (any phase, non-negotiable)
+
+- Produce `Finding` records directly. The deterministic Assertion Layer is
+  the only `Finding` producer.
+- Set `finding_type`, `evidence_strength`, `review_action`, `blast_radius`,
+  `readiness_status`. Classification is deterministic.
+- Populate `observed_evidence`. Deterministic Bootstrap Inventory owns it.
+  AI populates `declared_intent` only.
+- Delete from the mandatory baseline. The 12 canonical controls always run.
+- Call connectors or hold credentials. Context is fetched by deterministic
+  policy-gated code in response to AI's `ContextRequest`.
+- Invent new active tests at runtime. The catalog is checked-in code.
+- Execute SQL, code, migrations, shell. Remediation is guidance text only.
+- Run tool-use loops that take state-changing actions.
+- Approve launch, accept risk, auto-merge fixes, create incidents.
+- Claim compliance.
 
 ### AI output requirements
 
-Every AI-generated explanation must include:
+Every AI-generated output must include:
 
-- evidence reference
-- `confidence` level (`low | medium | high`)
-- `uncertainty_notes`
-- recommended human review action
-- model id + provider (so a future change in model version is auditable)
+- Evidence reference (`fact_id`s from `scan-facts.json`).
+- `confidence` level (`low | medium | high`).
+- `uncertainty_notes`.
+- Recommended human review action.
+- `model_id` + provider (so a future model rollforward is auditable).
+- `prompt_fingerprint_sha256` for the audit spine.
+
+### Where AI surfaces in the report
+
+The reporter renders three distinct tiers (Phase 2; Phase 1 has two —
+no active outcomes yet):
+
+1. **Findings** — deterministic, classified.
+2. **AI-suggested areas for human review** — `AIConcern` records. Distinct
+   heading. Never mixed with findings.
+3. **Active validation outcomes** (Phase 2) — `proven_denial` /
+   `proven_allowed` / `inconclusive`.
+
+`--no-ai` removes tier 2 and leaves tiers 1 and 3 functional.
 
 ---
 
 ## 13. MVP Architecture
+
+**Superseded by the AI-first revision.** The seven-layer architecture
+(Observation → Inference → Assertion → Planning → Compilation →
+Execution) is documented in `phases/phase-1/REVISION_AI_SHAPE.md §1`.
+
+Summary of the change from the original two-stage shape below:
+
+- Scanners + parsers now emit `ScanFact[]` (deterministic observations),
+  never `Finding[]`. The artifact name `scanner-findings.json` is replaced
+  by `scan-facts.json`.
+- AI Inference Agent reads `scan-facts.json` + `declared-context.json`,
+  produces `hypotheses.json`.
+- A deterministic Assertion Layer is the **only** producer of `Finding`
+  records. Unasserted hypotheses become `AIConcern` entries in
+  `ai-concerns.json`, never findings.
+- A deterministic `ContextPolicyEvaluator` gates AI's `ContextRequest`s
+  for additional files / metadata.
+- Phase 2 adds an AI Security Planner Agent and a deterministic
+  `ActiveValidationPolicyCompiler`.
+
+Original diagram retained below for reference; it does NOT describe the
+current architecture.
 
 ```text
 Local CLI
@@ -916,7 +989,7 @@ Artifact Store
       |
       |-- declared-context.json
       |-- evidence-inventory.json
-      |-- scanner-findings.json
+      |-- scanner-findings.json   (renamed to scan-facts.json in revision)
       |-- control-cards.json
       |-- veyra-report.json
       |-- veyra-report.md
@@ -929,29 +1002,59 @@ CLI Output + Exit Code
 
 ## 14. Scanner and Analyzer Responsibilities
 
-### Deterministic scanners should produce findings
+**Superseded in part by the AI-first revision.** Under the new
+architecture (`phases/phase-1/REVISION_AI_SHAPE.md §1`, §3), scanners and
+analyzers do not produce findings — they produce `ScanFact[]`
+(observations). Findings are produced by deterministic assertion
+predicates that consume facts + hypotheses.
 
-Examples:
+### Deterministic scanners produce ScanFacts (not findings)
 
-- exposed secret detected
-- RLS disabled
-- public bucket found
-- dependency vulnerability found
-- `.env` committed
+Examples of facts a scanner emits:
 
-### AI should explain and enrich findings
+- `{ source.kind: 'gitleaks', match: { file, line, type, redacted_match } }`
+- `{ source.kind: 'osv', advisory: { package, version, advisory_id } }`
+- `{ source.kind: 'semgrep', rule_id, capture: { file, line, ... } }`
+- `{ source.kind: 'supabase_schema', element_kind, name }`
 
-Examples:
+A predicate (e.g. cc-11-8 for hardcoded keys, cc-11-10 for vulnerable
+deps) consumes the relevant facts and emits the `Finding`.
+
+### AI Inference produces Hypotheses (not findings)
+
+Examples of what AI Inference contributes:
+
+- "These three facts together suggest direct-object-access on tenant data
+  with no per-row check" → `Hypothesis { proposed_control_id: cc-11-3 }`.
+- "The auth router file has redirect-on-load but no server-side check"
+  → `Hypothesis { proposed_control_id: cc-11-1 }`.
+
+The Assertion Layer then runs the cc-11-3 / cc-11-1 predicate against
+the facts the hypothesis cites. If the predicate fires, a Finding is
+emitted with the hypothesis as supporting context. If not, the
+hypothesis becomes an `AIConcern` (or is contradicted, going to
+`assertions.json` only).
+
+### AI Explanation enriches findings (Phase 2 ai-explainer)
+
+Examples (Phase 2 `ai-explainer` agent):
 
 - explain why the issue matters
 - map issue to launch risk
-- suggest negative tests
-- suggest remediation
+- refine suggested negative tests
+- suggest remediation guidance (text only, never executable SQL)
 - generate report summary
+- write control-card narrative
 
-AI must be optional in the local-first version. The deterministic scanner should still produce useful findings and reports without an AI provider key. When AI is enabled, it should operate through a provider-agnostic adapter and receive sanitized evidence only.
+### `--no-ai` baseline
 
-This separation prevents the product from becoming an unreliable AI wrapper.
+AI must be optional. The deterministic Assertion Layer still produces
+the full mandatory baseline of findings without an AI provider key.
+`AIConcern` entries do not appear in the report under `--no-ai`; the
+Findings and (Phase 2) Active Validation tiers do.
+
+This separation prevents the product from becoming an unreliable AI
+wrapper while letting AI genuinely contribute as an inference layer.
 
 ---
 

@@ -23,6 +23,16 @@ Fill the Phase 1 placeholder file `src/types/active-validation.ts` with the five
 - `ActiveValidationResult = { test_id, control_id, outcome: 'proven_denial' | 'proven_allowed' | 'inconclusive', evidence_refs[], duration_ms, synthetic_data_refs[], assertion_details }`
 - `TestPlanEntry = { test_id, control_id, owning_agent_id, required_synthetic_resources, expected_outcome_hint, max_duration_ms }`
 
+### `src/types/scan-plan.ts` (NEW — shared plan types)
+
+Plan types live in their own file because they have **two distinct producers** (the AI Security Planner from step 07b and any deterministic-fallback plan generator) and **one consumer** (the `ActiveValidationPolicyCompiler` from step 07c). The compiler is plan-source-agnostic: it must work on any well-typed plan, not just AI-produced ones.
+
+- `ProposedScanPlan = { scan_id, generated_by: 'ai_security_planner' | 'deterministic_fallback', entries: ProposedScanPlanEntry[], generated_at }`
+- `ProposedScanPlanEntry = { test_id, control_id, priority: 'low'|'medium'|'high', parameters: Record<string, unknown>, justification: string }`
+- `CompiledScanPlan = { scan_id, source: ProposedScanPlan['generated_by'], entries: CompiledScanPlanEntry[], compiled_at, baseline_injections: string[] }`
+- `CompiledScanPlanEntry = ProposedScanPlanEntry + { validated_target_ref: TargetRef, allowed_actions_satisfied: AllowedAction[] }`
+- `ActiveValidationCompilationError = { rejected_entries: Array<{ entry, reason }>, missing_baseline_controls: ControlId[] }` — note that missing-baseline is recorded for audit but doesn't cause rejection; the compiler injects from the deterministic fallback.
+
 ### `ActionExecutor` interface
 
 **Birthplace resolved: Phase 1 step 02** (typed stub only; no implementation in Phase 1). Phase 2 step 02 imports the interface from `src/core/policy/executors/types.ts` and adds nothing to it — the type shape is locked when Phase 1 step 02 lands. Step 01 decision 2 ratifies this.

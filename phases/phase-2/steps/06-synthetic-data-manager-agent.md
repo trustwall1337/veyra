@@ -19,7 +19,8 @@ Single failure boundary for both Synthesize and Cleanup. The agent reads `scan-p
 - `synthesize` semantics: walk `scan-plan.json` entries; for each resource, call the relevant `ActionExecutor.execute` action; tag every resource with `user_metadata.veyra_scan_id` and `user_metadata.veyra_synthetic: true`; **record the returned uuid in a Veyra-owned in-memory registry that persists to `synthetic-resources.json`**. On ANY failure, call `cleanup` for everything in the registry so far and abort the scan before Exercise.
 - `cleanup` semantics: read `synthetic-resources.json`; for each registered uuid, call `auth.admin.deleteUser(uuid, { shouldSoftDelete: false })` (hard delete); record per-uuid outcome. **DO NOT call `auth.admin.listUsers`** — listing pre-existing users would violate `§4.8`'s "agent never reads pre-existing user data" rule.
 - `verify` semantics: for each uuid in the registry, attempt `auth.admin.getUser(uuid)`; expect HTTP 404 / "user not found" (counted as deleted). Any uuid that still resolves is a residual. **The agent only queries the specific uuids Veyra itself created — never enumerates the user table.**
-- On residual > 0: emit `confirmed_issue + fix_before_launch` finding flagging the failed cleanup; non-zero exit.
+- **Bounded auto-retry on residuals (per `PHASE_2_PLAN §11.3`):** if verification finds `residual_count > 0`, the manager retries `deleteUser(uuid)` for each residual UUID up to **3 times with exponential backoff (1s, 4s, 16s)**. Every retry attempt is logged to `scan-actions.log` as `{ action_id: 'cleanup_retry', attempt: 1..3, uuid_fingerprint_sha256, outcome }`. After each retry, re-verify via per-uuid `getUser`. If residuals clear, cleanup succeeds and the scan continues.
+- On residual > 0 **after all retries exhaust**: emit `confirmed_issue + fix_before_launch` finding flagging the failed cleanup; non-zero exit. Veyra does not attempt unbounded retries — "delete harder" is the failure mode of a malicious tool.
 - Emits `synthetic-resources.json` (the registry; the agent's bookkeeping spine) + `cleanup-proof.json` (receipt).
 
 ### Connector (`src/connectors/supabase/admin/`)
@@ -32,7 +33,8 @@ Single failure boundary for both Synthesize and Cleanup. The agent reads `scan-p
 
 - Integration test: synthesize 3 identities → assert via per-uuid `auth.admin.getUser(uuid)` against the registry that 3 exist; run cleanup; assert per-uuid `getUser(uuid)` returns "not found" for all 3. **Listing the full user table is forbidden — the test must use the registry, same as the agent.**
 - Partial-failure test: induce a failure mid-Synthesize → assert all previously created resources are rolled back; scan exits non-zero before Exercise.
-- Induced-cleanup-failure test (kill the manager mid-Cleanup): assert non-zero exit + residual report + a `confirmed_issue` finding flagging the failed cleanup.
+- Induced-cleanup-failure test (kill the manager mid-Cleanup): assert non-zero exit + residual report + a `confirmed_issue` finding flagging the failed cleanup AFTER the 3 retries exhaust.
+- Transient-failure test: mock `deleteUser` to fail on attempts 1 and 2 then succeed on attempt 3; assert scan continues normally (auto-retry catches transient failure without human ceremony).
 - `cleanup-proof.json` shape: `{ scan_id, created_count, deleted_count, residual_count, duration_ms, per_resource_log }`.
 - Approval-file consumption: scan refuses to reuse the same approval file (per step 01 decision 5 outcome).
 
