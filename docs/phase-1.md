@@ -5,8 +5,17 @@ checks, optionally invokes an AI inference layer, and produces a launch-
 readiness report. This document describes what Phase 1 ships, what it does
 not, and how to run it.
 
-Derived from `phases/phase-1/PHASE_1_PLAN.md` and
-`phases/FINAL_PRODUCT_PLAN.md`.
+Derived from `phases/phase-1/PHASE_1_PLAN.md` §6 (Required), §7 Task 1,
+§9 (non-claims), and `phases/FINAL_PRODUCT_PLAN.md` §8 (trust documentation)
+and §18 (non-goals).
+
+> **Phase 1 implementation state.** This doc describes the Phase 1
+> contract. Some surfaces are interface-only in Phase 1 and ship as
+> shipped behavior in Phase 2: the production MCP transport (Lovable
+> + Supabase connectors use an injectable transport boundary; OAuth
+> flow lands in Phase 2), and the full AI inference + Pass-2
+> orchestration end-to-end wiring. The deterministic Pass-1 predicates,
+> the report renderer, and the policy gate are shipped and tested.
 
 ## What Phase 1 does
 

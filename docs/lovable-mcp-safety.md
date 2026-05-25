@@ -7,6 +7,14 @@ The Lovable connector is a **collector only**. It does not contain
 security reasoning, does not classify findings, and does not change
 the project. Its job is to fetch declared intent and file inventory.
 
+> **Phase 1 implementation state.** The connector's allowlist policy
+> and `send_message` template-only enforcement are shipped and tested.
+> The production OAuth-backed MCP transport itself is Phase 2 work;
+> Phase 1 ships the contained transport boundary
+> (`src/connectors/lovable/client.ts` accepts an injectable
+> `LovableTransport`) per the CLAUDE.md §Resolved engineering
+> decisions fallback path.
+
 ## The six-tool allowlist
 
 Veyra calls only these tools:

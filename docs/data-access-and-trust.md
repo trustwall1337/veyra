@@ -67,6 +67,13 @@ matched).
 
 ## AI usage (when opted in)
 
+The Phase 1 default AI provider is **Anthropic** (`--ai-provider anthropic`);
+the underlying interface (`AiProvider` in `src/ai/types.ts`) is
+provider-neutral, and the registry in `src/ai/registry.ts` is where new
+providers register without touching shared types (FPP §2A). OpenAI is
+declared Phase 2 in the registry — opting in selects the Anthropic
+adapter only.
+
 When you opt into AI via `--ai-provider anthropic` plus
 `ANTHROPIC_API_KEY`:
 

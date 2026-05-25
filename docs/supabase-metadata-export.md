@@ -7,6 +7,16 @@ Veyra reads Supabase metadata two ways: through MCP (when configured)
 and through a local `schema.sql` export (always). Both paths are
 read-only.
 
+> **Phase 1 implementation state.** The per-call policy guard and the
+> allowlist + denylist enforcement ship in `src/connectors/supabase/`.
+> Production OAuth-backed MCP transport wiring lands in Phase 2; Phase 1
+> ships the contained transport boundary (an injectable
+> `SupabaseTransport`) per the CLAUDE.md §Resolved engineering
+> decisions fallback path. The `read_only=true` forwarding behavior
+> described below reflects the Phase 1 derivation under the
+> `read_only_evidence` policy — see `src/connectors/supabase/policy.ts`
+> and the §"How `read_only` is derived" subsection.
+
 ## The MCP path (`--supabase-mcp <project_ref>`)
 
 The Supabase connector enforces the following on every tool call:
