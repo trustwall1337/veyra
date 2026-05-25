@@ -167,6 +167,17 @@ Deterministic code must:
 - compile executable plans from allowed actions only
 - preserve a complete report path when AI is disabled
 
+## Documentation
+
+- [`docs/phase-1.md`](./docs/phase-1.md) — Phase 1 overview, CLI flags,
+  how to run a scan, how to read the report, known limits.
+- [`docs/lovable-mcp-safety.md`](./docs/lovable-mcp-safety.md) — Lovable
+  MCP allowlist + fixed prompt templates.
+- [`docs/supabase-metadata-export.md`](./docs/supabase-metadata-export.md)
+  — what Supabase metadata Veyra reads, and how to export `schema.sql`.
+- [`docs/data-access-and-trust.md`](./docs/data-access-and-trust.md) —
+  the trust model in plain language, with non-goals.
+
 ## Development
 
 ```bash

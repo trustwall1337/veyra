@@ -1,6 +1,6 @@
 # Step 20 — Phase 1 documentation
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 1` (docs/), §6 Required (documentation for safe metadata export); `FINAL_PRODUCT_PLAN §8` trust documentation
 **Produces:** `docs/phase-1.md`, `docs/lovable-mcp-safety.md`, `docs/supabase-metadata-export.md`, `docs/data-access-and-trust.md`
 **Depends on:** 03, 15, 16, 19
