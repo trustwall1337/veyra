@@ -1,5 +1,5 @@
 {
-  "$schema_note": "Veyra Phase 1 fixture expectations for AIConcern entries (revision §3.4 + §11). Sibling of expected-findings.json. Read only when AI is opted in. Each entry: { control_id?, category, confidence, must_surface }. confidence='low' entries are tolerated but not required (per revision §14 Q6 + Q8).",
+  "$schema_note": "Veyra Phase 1 fixture EXPECTATION descriptors for AIConcern emission (revision §3.4 + §11). These are NOT AIConcern objects — they are gate expectations (the ExpectedAIConcern shape). Sibling of expected-findings.json. Read only when AI is opted in. Each entry: { category, confidence, must_surface, description, fixture_anchor, control_id? }. confidence='low' entries are tolerated but not required (per revision §14 Q6 + Q8).",
   "fixture_path": "examples/vulnerable-lovable-supabase",
   "must_surface": [
     {

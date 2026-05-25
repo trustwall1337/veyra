@@ -6,7 +6,7 @@
 **Produces:** amended fixture at `examples/vulnerable-lovable-supabase/`
 **Depends on:** 02b, 08b, 08d
 **Executed by:** plain coding pass
-**Verification:** integration assertion under `pnpm test`; `expected-ai-concerns.json` shape validated against `AIConcern` type
+**Verification:** integration assertion under `pnpm test`; `expected-ai-concerns.json` entries are EXPECTATION DESCRIPTORS (the `ExpectedAIConcern` shape), not actual `AIConcern` objects — the gate at 19b loads them as expectations against the AI-enabled scan's emitted AIConcerns
 
 ## Goal
 

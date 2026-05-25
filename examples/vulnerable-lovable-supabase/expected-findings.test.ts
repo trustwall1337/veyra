@@ -202,4 +202,52 @@ describe('cross-reference: control_ids span both manifests in lockstep', () => {
       }
     }
   });
+
+  it('retro-04b f6: every control_id in both manifests exists in the canonical controls.ts catalog', async () => {
+    const { CONTROLS } = await import('../../src/agents/evidence-report/controls.js');
+    const catalogIds = new Set(CONTROLS.map((c) => c.control_id));
+    const findings = await loadManifest();
+    const concerns = await loadAiConcerns();
+    for (const e of findings.must_surface) {
+      expect(catalogIds.has(e.control_id), `expected-findings control_id ${e.control_id} not in canonical catalog`).toBe(true);
+    }
+    for (const e of concerns.must_surface) {
+      if (e.control_id !== undefined) {
+        expect(catalogIds.has(e.control_id), `expected-ai-concerns control_id ${e.control_id} not in canonical catalog`).toBe(true);
+      }
+    }
+  });
+});
+
+describe('retro-04b f3: --no-ai parity tracking (§14 Q8)', () => {
+  it('any must_surface entry with finding_type=missing_evidence is a deterministic absence check, not AI-related', async () => {
+    // §14 Q8 says --no-ai runs must not produce missing_evidence
+    // findings for controls THAT WOULD HAVE BENEFITED FROM AI. A
+    // deterministic missing_evidence (e.g. cc-11-11 "absence of
+    // negative tests") is allowed because the absence is observable
+    // without AI. The 19b gate enforces the runtime side (Pass-2
+    // disposition with empty hypotheses produces no missing_evidence).
+    const parsed = await loadManifest();
+    const allowedMissingEvidenceControls = new Set([
+      'cc-11-11', // absence of negative test files — deterministic
+    ]);
+    for (const entry of parsed.must_surface) {
+      if (entry.finding_type === 'missing_evidence') {
+        expect(
+          allowedMissingEvidenceControls.has(entry.control_id),
+          `${entry.control_id} declares missing_evidence in must_surface but is not in the allowed deterministic-absence set; §14 Q8 forbids AI-caused missing_evidence findings`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+describe('retro-04b f4: expected-findings.json references scan-facts.json shape (post-08b)', () => {
+  it('the raw manifest text does not mention scanner-findings.json', async () => {
+    const raw = await fs.readFile(
+      path.join(FIXTURE_DIR, 'expected-findings.json'),
+      'utf8',
+    );
+    expect(raw).not.toContain('scanner-findings.json');
+  });
 });
