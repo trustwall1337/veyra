@@ -265,12 +265,36 @@ describe('Phase 1 fixture validation gate', () => {
     expect(missing, `missing controls: ${missing.join(', ')}`).toEqual([]);
   });
 
-  it('no findings reference seeded clean tables (timezones, feature_flags)', async () => {
+  it('no findings reference any must_not_surface anchor (retro-19 f4)', async () => {
     const { findings } = await runGate();
-    for (const f of findings) {
-      const blob = `${f.title} ${f.summary}`.toLowerCase();
-      expect(blob).not.toContain('timezones');
-      expect(blob).not.toContain('feature_flags');
+    const expected = await loadExpected();
+    // Extract the matcher token from each anchor: the segment after
+    // the em-dash, lowercased, with stray prefixes/suffixes stripped.
+    // Examples:
+    //   "supabase/schema.sql — public.timezones"   → "timezones"
+    //   "supabase/schema.sql — public.feature_flags" → "feature_flags"
+    //   "mcp-fixtures/.../buckets.json — internal-reports bucket"
+    //     → "internal-reports"
+    const tokensFor = (anchor: string): string[] => {
+      const tail = anchor.split('—').slice(-1)[0] ?? anchor;
+      const cleaned = tail
+        .trim()
+        .toLowerCase()
+        .replace(/^public\./, '')
+        .replace(/\s+bucket$/, '');
+      return [cleaned];
+    };
+    for (const entry of expected.must_not_surface) {
+      const tokens = tokensFor(entry.anchor);
+      for (const f of findings) {
+        const blob = `${f.title} ${f.summary}`.toLowerCase();
+        for (const t of tokens) {
+          expect(
+            blob.includes(t),
+            `must_not_surface anchor "${entry.anchor}" matched in finding "${f.id}": ${f.title}`,
+          ).toBe(false);
+        }
+      }
     }
   });
 
@@ -279,6 +303,11 @@ describe('Phase 1 fixture validation gate', () => {
     for (const banned of ['secure', 'safe', 'compliant']) {
       expect(markdown.toLowerCase()).not.toMatch(new RegExp(`\\b${banned}\\b`));
     }
+  });
+
+  it('rendered markdown report includes the Sources section (retro-19 f8)', async () => {
+    const { markdown } = await runGate();
+    expect(markdown).toContain('## Sources');
   });
 
   it('cc-11-12 surfaces with the MCP bucket artifact present', async () => {
