@@ -16,6 +16,18 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
+// NOTE (retro-17 f3-diff): productUnderstandingAgent imports the AI
+// Product-Understanding helper functions from a sibling agent
+// folder. Strict reading of §4.0 (agents do not import each other)
+// would forbid this; the relaxed reading is that the imported items
+// (`buildAiDeclaredIntent`, `writeAiDeclaredIntentArtifact`) are pure
+// helper functions, not the sibling VeyraAgent's `.run()`. The
+// preferred long-term architecture is for the orchestrator to run
+// `createAiProductUnderstandingAgent()` as a separate registered
+// agent and feed its artifact path into the composer; that split is
+// noted as a follow-up and the current wrapper remains for backward
+// compat with direct `productUnderstandingAgent.run()` calls in
+// tests.
 import {
   buildAiDeclaredIntent,
   writeAiDeclaredIntentArtifact,
@@ -143,6 +155,14 @@ export const productUnderstandingAgent: VeyraAgent<
           warnings.push(`AI intent write failed: ${writeR.error.message}`);
         } else {
           aiIntentPath = writeR.value;
+          // Per retro-17 f4-diff: register the AI intent artifact
+          // explicitly so the orchestrator's AgentResult.artifacts
+          // surfaces it for downstream consumers.
+          artifacts.push({
+            scanId: context.scanId,
+            kind: 'evidence_inventory',
+            path: writeR.value,
+          });
         }
       }
     }
