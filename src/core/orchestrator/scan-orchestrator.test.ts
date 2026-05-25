@@ -231,3 +231,172 @@ describe('parallel batching — determinism (step 18b)', () => {
     expect(parsed.trace.find((t) => t.agent_id === 'b')?.layer).toBe(1);
   });
 });
+
+describe('Pass-2 wiring (18b retro-fix)', () => {
+  function hyp(id: string, control_id: string, factId: string) {
+    return {
+      hypothesis_id: id,
+      source: 'ai_inference' as const,
+      proposed_control_id: control_id,
+      evidence_refs: [{ fact_id: factId }],
+      reasoning: `r-${id}`,
+      confidence: 'medium' as const,
+      uncertainty_notes: 'n',
+      model_id: 'm',
+      prompt_fingerprint_sha256: '0'.repeat(64),
+    };
+  }
+
+  it('runs disposeHypotheses after Pass-1 and writes assertions.json + ai-concerns.json', async () => {
+    const orch = createScanOrchestrator({
+      ai: {
+        collectHypotheses: () => [hyp('h1', 'cc-11-9', 'f-unknown')],
+      },
+    });
+    orch.register(
+      stubAgent('seed', [], {
+        findings: [
+          {
+            id: 'f-1',
+            control_id: 'cc-11-5',
+            finding_type: 'likely_issue',
+            evidence_strength: 'medium',
+            reproducibility: 'static',
+            review_action: 'review_before_launch',
+            blast_radius: 'tenant_data',
+            title: 't',
+            summary: 's',
+            evidence_refs: ['f-1'],
+          },
+        ],
+      }),
+    );
+    const c = await ctx();
+    const r = await orch.run(c);
+    expect(r.aiConcerns.length).toBe(1);
+    const written = await fs.readdir(c.artifactDir);
+    expect(written).toContain('assertions.json');
+    expect(written).toContain('ai-concerns.json');
+  });
+
+  it('context-request retry cap: hypothesis falls through to rule 4 after cap retries', async () => {
+    // Evaluator grants but never resolves the hypothesis — the same
+    // request is re-emitted each iteration, so the cap controls how
+    // many retries occur before forced exhaustion.
+    let evaluations = 0;
+    const orch = createScanOrchestrator({
+      contextRetryCap: 2,
+      ai: {
+        collectHypotheses: () => [
+          {
+            ...hyp('h1', 'cc-11-9', 'f-x'),
+            requires_context: {
+              request_id: 'r1',
+              for_hypothesis_id: 'h1',
+              justification: 'need more',
+              kind: 'read_file' as const,
+              args: { kind: 'read_file' as const, path: 'src/x.ts' },
+            },
+          },
+        ],
+        evaluateContextRequest: async () => {
+          evaluations += 1;
+          return { granted: true };
+        },
+      },
+    });
+    orch.register(stubAgent('seed', []));
+    const c = await ctx();
+    const r = await orch.run(c);
+    expect(r.contextRetryCount).toBe(2);
+    expect(evaluations).toBe(2);
+    expect(r.aiConcerns.length).toBe(1);
+  });
+
+  it('context-request denied → hypothesis falls through to rule 4 immediately', async () => {
+    const orch = createScanOrchestrator({
+      contextRetryCap: 2,
+      ai: {
+        collectHypotheses: () => [
+          {
+            ...hyp('h1', 'cc-11-9', 'f-x'),
+            requires_context: {
+              request_id: 'r1',
+              for_hypothesis_id: 'h1',
+              justification: 'need more',
+              kind: 'read_file' as const,
+              args: { kind: 'read_file' as const, path: 'src/x.ts' },
+            },
+          },
+        ],
+        evaluateContextRequest: async () => ({ granted: false, reason: 'denylist' }),
+      },
+    });
+    orch.register(stubAgent('seed', []));
+    const c = await ctx();
+    const r = await orch.run(c);
+    // Denial on the first retry exhausts the hypothesis; the
+    // re-dispose moves it to rule 4. Cap not reached.
+    expect(r.contextRetryCount).toBe(1);
+    expect(r.aiConcerns.length).toBe(1);
+  });
+
+  it('AI disabled → no aiConcerns, no assertions.json, no ai-concerns.json', async () => {
+    const orch = createScanOrchestrator();
+    orch.register(stubAgent('seed', []));
+    const c = await ctx();
+    const r = await orch.run(c);
+    expect(r.aiConcerns.length).toBe(0);
+    expect(r.contextRetryCount).toBe(0);
+    const written = await fs.readdir(c.artifactDir);
+    expect(written).not.toContain('assertions.json');
+    expect(written).not.toContain('ai-concerns.json');
+  });
+
+  it('scan-actions.log records mid-scan agent throws', async () => {
+    const orch = createScanOrchestrator();
+    orch.register(stubAgent('bad', [], { throws: true }));
+    const c = await ctx();
+    await orch.run(c);
+    const log = await fs.readFile(
+      path.join(c.artifactDir, 'scan-actions.log'),
+      'utf8',
+    );
+    expect(log).toContain('"event":"agent_threw"');
+    expect(log).toContain('"agent_id":"bad"');
+  });
+
+  it('byte-determinism: same input → byte-identical findings.json + ai-concerns.json (scrubbed)', async () => {
+    function scrub(s: string): string {
+      // strip timestamps + scan ids so the comparison ignores
+      // run-specific values.
+      return s
+        .replace(/"observed_at":"[^"]+"/g, '"observed_at":"<scrubbed>"')
+        .replace(/"recorded_at":"[^"]+"/g, '"recorded_at":"<scrubbed>"')
+        .replace(/"generated_at":"[^"]+"/g, '"generated_at":"<scrubbed>"')
+        .replace(/"scanId":"[^"]+"/g, '"scanId":"<scrubbed>"');
+    }
+    function build(concurrency: number) {
+      const orch = createScanOrchestrator({
+        maxConcurrency: concurrency,
+        ai: {
+          collectHypotheses: () => [hyp('h1', 'cc-11-9', 'f-x')],
+        },
+      });
+      for (const id of ['a', 'b', 'c']) {
+        orch.register(stubAgent(id, []));
+      }
+      return orch;
+    }
+    const c1 = await ctx();
+    const c4 = await ctx();
+    const r1 = await build(1).run(c1);
+    const r4 = await build(4).run(c4);
+    expect(scrub(JSON.stringify(r1.findings))).toBe(
+      scrub(JSON.stringify(r4.findings)),
+    );
+    expect(scrub(JSON.stringify(r1.aiConcerns))).toBe(
+      scrub(JSON.stringify(r4.aiConcerns)),
+    );
+  });
+});

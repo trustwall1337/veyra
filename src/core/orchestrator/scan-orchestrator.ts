@@ -19,6 +19,8 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
+import { disposeHypotheses } from '../assertions/hypothesis-disposition.js';
+import type { AIConcern } from '../../types/ai-concern.js';
 import type {
   AgentExecutionContext,
   AgentMetadata,
@@ -26,7 +28,10 @@ import type {
   VeyraAgent,
 } from '../../types/agent.js';
 import type { ArtifactRef } from '../../types/artifact.js';
+import type { ContextRequest } from '../../types/context-request.js';
 import type { Finding } from '../../types/finding.js';
+import type { Hypothesis } from '../../types/hypothesis.js';
+import type { ScanFact } from '../../types/scan-fact.js';
 
 export class NotImplementedError extends Error {
   override readonly name = 'NotImplementedError';
@@ -47,6 +52,36 @@ export interface OrchestratorRunResult {
   readonly artifacts: readonly ArtifactRef[];
   readonly warnings: readonly string[];
   readonly resultsByAgent: ReadonlyMap<string, AgentResult<unknown>>;
+  /**
+   * Pass-2 outputs (revision §4.2). Empty when AI is disabled or no
+   * hypotheses were produced.
+   */
+  readonly aiConcerns: readonly AIConcern[];
+  readonly contextRetryCount: number;
+}
+
+/**
+ * Hook used by AI-enabled scans. The orchestrator calls
+ * `collectHypotheses` after Pass-1 finishes, then runs Pass-2 over
+ * (findings, hypotheses). When undefined, Pass-2 is a no-op — the
+ * scan is deterministic-only.
+ */
+export interface AiHooks {
+  collectHypotheses(
+    resultsByAgent: ReadonlyMap<string, AgentResult<unknown>>,
+  ): readonly Hypothesis[];
+  /**
+   * Optional context-evaluator hook used by §4.2 rule 3 retries. The
+   * orchestrator forwards each `ContextRequest` and gets back new
+   * `ScanFact[]` or an error. Retry cap defaults to 2.
+   */
+  evaluateContextRequest?: (
+    request: ContextRequest,
+  ) => Promise<{
+    readonly granted: boolean;
+    readonly facts?: readonly ScanFact[];
+    readonly reason?: string;
+  }>;
 }
 
 export interface ScanOrchestrator {
@@ -165,6 +200,35 @@ export interface CreateScanOrchestratorOptions {
    * checks).
    */
   readonly maxConcurrency?: number;
+  /**
+   * AI hooks. When provided, the orchestrator runs Pass-2
+   * (hypothesis disposition) after Pass-1 finishes, drives the
+   * context-request retry loop, and persists `assertions.json` +
+   * `ai-concerns.json`. When undefined, AI is disabled — the scan
+   * is deterministic-only.
+   */
+  readonly ai?: AiHooks;
+  /** Retry cap for context requests per §4.2 rule 3. Default 2. */
+  readonly contextRetryCap?: number;
+}
+
+const DEFAULT_CONTEXT_RETRY_CAP = 2;
+
+async function appendScanActionsLog(
+  artifactDir: string,
+  entry: Record<string, unknown>,
+): Promise<void> {
+  const filePath = path.join(artifactDir, 'scan-actions.log');
+  const row = JSON.stringify({
+    recorded_at: new Date().toISOString(),
+    ...entry,
+  });
+  try {
+    await fs.mkdir(artifactDir, { recursive: true });
+    await fs.appendFile(filePath, row + '\n', 'utf8');
+  } catch {
+    // log sink failures must not break a scan
+  }
 }
 
 export function createScanOrchestrator(
@@ -257,8 +321,125 @@ export function createScanOrchestrator(
             context.logger.warn(
               `orchestrator: agent "${out.id}" threw: ${out.error.reason}`,
             );
+            // Log to scan-actions.log per §12b mid-scan failure rule:
+            // a thrown agent is recorded for audit, the scan continues.
+            await appendScanActionsLog(context.artifactDir, {
+              event: 'agent_threw',
+              agent_id: out.id,
+              reason: out.error.reason,
+            });
             trace.push({ agent_id: out.id, layer: layerIdx, status: 'threw' });
           }
+        }
+      }
+
+      // ── Pass-2 (revision §4.2) ──────────────────────────────────
+      // After all Pass-1 agents finish, run hypothesis disposition.
+      // The orchestrator owns the context-request retry loop with
+      // hard cap. Pass-2 is the SOLE writer of `assertions.json` and
+      // `ai-concerns.json`. AIConcerns from Pass-2 do NOT alter
+      // `findings` classification (constraints 1, 7, 9) — they only
+      // attach hypotheses to existing findings.
+      let aiConcerns: readonly AIConcern[] = [];
+      let contextRetryCount = 0;
+      let finalFindings: readonly Finding[] = findings;
+      const retryCap = options.contextRetryCap ?? DEFAULT_CONTEXT_RETRY_CAP;
+      if (options.ai !== undefined) {
+        const hypotheses = options.ai.collectHypotheses(resultsByAgent);
+        const exhausted = new Set<string>();
+        let disposition = disposeHypotheses({
+          findings: finalFindings,
+          hypotheses,
+        });
+        // Retry loop for rule-3 context requests. Capped at retryCap;
+        // exhausted hypotheses fall through to rule 4 on the final
+        // dispose call.
+        const evaluator = options.ai.evaluateContextRequest;
+        while (
+          evaluator !== undefined &&
+          disposition.contextRequestsToRetry.length > 0 &&
+          contextRetryCount < retryCap
+        ) {
+          contextRetryCount += 1;
+          for (const pending of disposition.contextRequestsToRetry) {
+            try {
+              const r = await evaluator(pending.request);
+              if (!r.granted) {
+                exhausted.add(pending.hypothesis_id);
+                await appendScanActionsLog(context.artifactDir, {
+                  event: 'context_request_denied',
+                  hypothesis_id: pending.hypothesis_id,
+                  reason: r.reason ?? 'denied',
+                });
+              }
+            } catch (cause) {
+              exhausted.add(pending.hypothesis_id);
+              const m = cause instanceof Error ? cause.message : String(cause);
+              await appendScanActionsLog(context.artifactDir, {
+                event: 'context_request_failed',
+                hypothesis_id: pending.hypothesis_id,
+                reason: m,
+              });
+            }
+          }
+          disposition = disposeHypotheses({
+            findings: finalFindings,
+            hypotheses,
+            contextRetryExhausted: exhausted,
+          });
+        }
+        // If cap reached with requests still pending, force exhaustion
+        // so the last dispose moves them to rule 4 (AIConcern).
+        if (
+          disposition.contextRequestsToRetry.length > 0 &&
+          contextRetryCount >= retryCap
+        ) {
+          for (const pending of disposition.contextRequestsToRetry) {
+            exhausted.add(pending.hypothesis_id);
+            await appendScanActionsLog(context.artifactDir, {
+              event: 'context_retry_cap_exhausted',
+              hypothesis_id: pending.hypothesis_id,
+              cap: retryCap,
+            });
+          }
+          disposition = disposeHypotheses({
+            findings: finalFindings,
+            hypotheses,
+            contextRetryExhausted: exhausted,
+          });
+        }
+
+        finalFindings = disposition.findings;
+        aiConcerns = disposition.aiConcerns;
+
+        // Persist assertions audit + ai-concerns artifacts.
+        try {
+          await fs.mkdir(context.artifactDir, { recursive: true });
+          const aPath = path.join(context.artifactDir, 'assertions.json');
+          await fs.writeFile(
+            aPath,
+            JSON.stringify({ assertions: disposition.assertions }, null, 2),
+            'utf8',
+          );
+          artifacts.push({
+            scanId: context.scanId,
+            kind: 'evidence_inventory',
+            path: aPath,
+          });
+          const cPath = path.join(context.artifactDir, 'ai-concerns.json');
+          await fs.writeFile(
+            cPath,
+            JSON.stringify({ ai_concerns: aiConcerns }, null, 2),
+            'utf8',
+          );
+          artifacts.push({
+            scanId: context.scanId,
+            kind: 'evidence_inventory',
+            path: cPath,
+          });
+        } catch (cause) {
+          const m = cause instanceof Error ? cause.message : String(cause);
+          warnings.push(`pass2_artifact_write_failed: ${m}`);
         }
       }
 
@@ -276,10 +457,14 @@ export function createScanOrchestrator(
 
       return {
         status: 'completed',
-        findings,
+        // Post-Pass-2 findings (with supporting_hypothesis_refs
+        // attached) when AI ran; otherwise Pass-1 findings unchanged.
+        findings: finalFindings,
         artifacts,
         warnings,
         resultsByAgent,
+        aiConcerns,
+        contextRetryCount,
       };
     },
   };
