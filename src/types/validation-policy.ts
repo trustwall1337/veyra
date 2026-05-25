@@ -39,12 +39,16 @@ export interface ValidationPolicy {
   readonly approval: ApprovalPolicy;
 }
 
+// Retro-16 f4: `read_application_logs` is NOT in the default read-only
+// set. Phase 1 step 16 explicitly says get_logs is "effectively
+// disabled in Phase 1 — production logs may contain PII / secrets /
+// session tokens and require explicit policy upgrade." Adding
+// read_application_logs requires an explicit policy opt-in.
 const READ_ONLY_ACTIONS: ReadonlySet<AllowedAction> = new Set<AllowedAction>([
   'read_code',
   'read_schema_metadata',
   'read_storage_metadata',
   'read_scanner_logs',
-  'read_application_logs',
 ]);
 
 const ACTIVE_ACTIONS: ReadonlySet<AllowedAction> = new Set<AllowedAction>([

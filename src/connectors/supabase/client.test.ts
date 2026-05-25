@@ -102,27 +102,94 @@ describe('SupabaseClient — per-call guard', () => {
     }
   });
 
-  it('denies get_logs under default read_only_evidence policy (read_application_logs is set)', async () => {
-    // read_application_logs IS in the default allowed_actions set, so
-    // get_logs would actually succeed; this test guards the inverse.
-    const stripped: ValidationPolicy = {
-      ...ROL_POLICY,
-      allowed_actions: new Set([
-        'read_code',
-        'read_schema_metadata',
-        'read_storage_metadata',
-      ]),
-    };
+  it('denies get_logs under the actual default read_only_evidence policy (retro-16 f4)', async () => {
+    // Per retro-16 f4: read_application_logs is NOT in the default
+    // read-only set. get_logs requires explicit policy opt-in.
     const t = recordingTransport();
     const c = createSupabaseClient({
       transport: t,
       projectRef: 'ref-abc',
-      policy: stripped,
+      policy: ROL_POLICY,
     });
     const r = await c.invoke('get_logs');
     expect(isErr(r)).toBe(true);
     if (isErr(r)) {
       expect(r.error.message).toContain('read_application_logs');
+    }
+  });
+});
+
+describe('SupabaseClient — retro-16 f2 (caller cannot override enforced fields)', () => {
+  it('rejects extra.project_ref override', async () => {
+    const t = recordingTransport();
+    const c = createSupabaseClient({
+      transport: t,
+      projectRef: 'ref-abc',
+      policy: ROL_POLICY,
+    });
+    const r = await c.invoke('list_tables', { project_ref: 'ref-other' });
+    expect(isErr(r)).toBe(true);
+    if (isErr(r)) expect(r.error.message).toContain('project_ref');
+  });
+
+  it('rejects extra.read_only override', async () => {
+    const t = recordingTransport();
+    const c = createSupabaseClient({
+      transport: t,
+      projectRef: 'ref-abc',
+      policy: ROL_POLICY,
+    });
+    const r = await c.invoke('list_tables', { read_only: false });
+    expect(isErr(r)).toBe(true);
+    if (isErr(r)) expect(r.error.message).toContain('read_only');
+  });
+});
+
+describe('SupabaseClient — retro-16 f8 + f9 (response redaction + transport error)', () => {
+  it('redacts secret-like strings from transport responses', async () => {
+    const fakeToken =
+      's' + 'k' + '-' + 'a' + 'n' + 't' + '-' + 'a'.repeat(40);
+    const transport = {
+      async invokeTool(): Promise<unknown> {
+        return {
+          tables: [
+            {
+              name: 'config',
+              description: `default key is ${fakeToken}`,
+            },
+          ],
+        };
+      },
+    };
+    const c = createSupabaseClient({
+      transport,
+      projectRef: 'ref-abc',
+      policy: ROL_POLICY,
+    });
+    const r = await c.invoke('list_tables');
+    expect(isOk(r)).toBe(true);
+    if (isOk(r)) {
+      const json = JSON.stringify(r.value);
+      expect(json.includes(fakeToken)).toBe(false);
+    }
+  });
+
+  it('converts transport exceptions into SupabaseTransportError', async () => {
+    const transport = {
+      async invokeTool(): Promise<unknown> {
+        throw new Error('upstream MCP died');
+      },
+    };
+    const c = createSupabaseClient({
+      transport,
+      projectRef: 'ref-abc',
+      policy: ROL_POLICY,
+    });
+    const r = await c.invoke('list_tables');
+    expect(isErr(r)).toBe(true);
+    if (isErr(r)) {
+      expect(r.error.name).toBe('SupabaseTransportError');
+      expect(r.error.message).toContain('upstream MCP died');
     }
   });
 });

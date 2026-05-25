@@ -5,11 +5,20 @@
  * tool call (not at startup only — that would be a launch-blocker for
  * Veyra itself). `read_only` is derived from the active
  * ValidationPolicy; the connector does NOT hardcode it.
+ *
+ * Retro-16 hardening:
+ *  - f2: caller-supplied `extra` cannot override enforced `project_ref`
+ *    or `read_only` fields. The enforced object is spread last.
+ *  - f8: storage-bucket artifact writes pass through redactSecrets.
+ *  - f9: transport exceptions are caught and converted to
+ *    `SupabaseTransportError` so the Result-returning contract isn't
+ *    broken by an upstream throw.
  */
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
+import { redactSecrets } from '../../ai/sanitization.js';
 import type { PolicyViolationError } from '../../types/errors.js';
 import { type Result, ok, err } from '../../types/result.js';
 import type { ValidationPolicy } from '../../types/validation-policy.js';
@@ -27,6 +36,33 @@ export interface SupabaseClientOptions {
   readonly transport: SupabaseTransport;
   readonly projectRef: string;
   readonly policy: ValidationPolicy;
+}
+
+export class SupabaseTransportError extends Error {
+  override readonly name = 'SupabaseTransportError';
+  constructor(
+    message: string,
+    public override readonly cause?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+export type SupabaseClientError = PolicyViolationError | SupabaseTransportError;
+
+const RESERVED_KEYS = new Set(['project_ref', 'read_only']);
+
+function redactResponse(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value) as string;
+  if (Array.isArray(value)) return value.map(redactResponse);
+  if (typeof value === 'object' && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactResponse(v);
+    }
+    return out;
+  }
+  return value;
 }
 
 export class SupabaseClient {
@@ -51,37 +87,84 @@ export class SupabaseClient {
   async invoke(
     tool: string,
     extra: Readonly<Record<string, unknown>> = {},
-  ): Promise<Result<unknown, PolicyViolationError>> {
+  ): Promise<Result<unknown, SupabaseClientError>> {
+    // Retro-16 f2: refuse to invoke if caller passed reserved keys.
+    for (const k of Object.keys(extra)) {
+      if (RESERVED_KEYS.has(k)) {
+        // Reserved keys (project_ref, read_only) cannot be supplied by
+        // the caller — they come from policy + connector config.
+        const { PolicyViolationError } = await import('../../types/errors.js');
+        return err(
+          new PolicyViolationError(
+            `Supabase invocation rejected: caller cannot set reserved key "${k}" via extra`,
+            'read_schema_metadata',
+            SUPABASE_CONNECTOR_ID as string,
+          ),
+        );
+      }
+    }
     const checked = checkInvocation(tool, this.#projectRef, this.#policy);
     if (!checked.ok) return checked;
-    return ok(
-      await this.#transport.invokeTool(tool, {
+    let raw: unknown;
+    try {
+      // Spread `extra` FIRST so enforced fields cannot be overridden.
+      raw = await this.#transport.invokeTool(tool, {
+        ...extra,
         project_ref: checked.value.project_ref,
         read_only: checked.value.read_only,
-        ...extra,
-      }),
-    );
+      });
+    } catch (cause) {
+      const m = cause instanceof Error ? cause.message : String(cause);
+      return err(
+        new SupabaseTransportError(
+          `Supabase transport failed for "${tool}": ${m}`,
+          cause,
+        ),
+      );
+    }
+    return ok(redactResponse(raw));
   }
 
-  listTables(): Promise<Result<unknown, PolicyViolationError>> {
+  listTables(): Promise<Result<unknown, SupabaseClientError>> {
     return this.invoke('list_tables');
   }
 
-  getAdvisors(): Promise<Result<unknown, PolicyViolationError>> {
+  listExtensions(): Promise<Result<unknown, SupabaseClientError>> {
+    return this.invoke('list_extensions');
+  }
+
+  listMigrations(): Promise<Result<unknown, SupabaseClientError>> {
+    return this.invoke('list_migrations');
+  }
+
+  getAdvisors(): Promise<Result<unknown, SupabaseClientError>> {
     return this.invoke('get_advisors');
   }
 
-  listStorageBuckets(): Promise<Result<unknown, PolicyViolationError>> {
+  getLogs(): Promise<Result<unknown, SupabaseClientError>> {
+    return this.invoke('get_logs');
+  }
+
+  listEdgeFunctions(): Promise<Result<unknown, SupabaseClientError>> {
+    return this.invoke('list_edge_functions');
+  }
+
+  getEdgeFunction(slug: string): Promise<Result<unknown, SupabaseClientError>> {
+    return this.invoke('get_edge_function', { slug });
+  }
+
+  listStorageBuckets(): Promise<Result<unknown, SupabaseClientError>> {
     return this.invoke('list_storage_buckets');
   }
 
-  getStorageConfig(): Promise<Result<unknown, PolicyViolationError>> {
+  getStorageConfig(): Promise<Result<unknown, SupabaseClientError>> {
     return this.invoke('get_storage_config');
   }
 
   /**
    * Persist the `list_storage_buckets` response as
    * `storage-buckets.json` for step 09's bucket-detection path.
+   * Retro-16 f8: pass through redactSecrets before writing.
    */
   async writeStorageBucketsArtifact(
     artifactDir: string,
@@ -90,7 +173,11 @@ export class SupabaseClient {
     const out = path.join(artifactDir, 'storage-buckets.json');
     try {
       await fs.mkdir(artifactDir, { recursive: true });
-      await fs.writeFile(out, JSON.stringify({ buckets }, null, 2), 'utf8');
+      await fs.writeFile(
+        out,
+        JSON.stringify({ buckets: redactResponse(buckets) }, null, 2),
+        'utf8',
+      );
       return ok(out);
     } catch (cause) {
       const m = cause instanceof Error ? cause.message : String(cause);
