@@ -70,6 +70,12 @@ export interface SchemaElementSource {
   readonly parser_id: ParserId;
   readonly element_kind: string;
   readonly name: string;
+  /**
+   * Sanitized payload carrying the parsed element's contents (e.g. for
+   * a `table` element: schema/name/rls_enabled/source_range JSON).
+   * Optional because some schema-element facts are name-only.
+   */
+  readonly payload?: ScanFactPayload;
 }
 
 export interface McpResponseSource {

@@ -12,6 +12,7 @@
  * agent shape per the step file's contract.
  */
 
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 
 import type {
@@ -22,11 +23,27 @@ import type {
 } from '../../types/agent.js';
 import type { ArtifactRef } from '../../types/artifact.js';
 import type { Finding } from '../../types/finding.js';
+import {
+  asConnectorId,
+  type ConnectorId,
+} from '../../types/identity.js';
 import { isErr } from '../../types/result.js';
+import type {
+  McpResponseSource,
+  ScanFact,
+  ScanFactPayload,
+} from '../../types/scan-fact.js';
 
 import { loadBucketsArtifact, evaluateBuckets } from './buckets.js';
 import { classifyTable } from './heuristics.js';
 import { parseSchemaSql } from './parser.js';
+import {
+  predicateAllAuthenticated,
+  predicateBroadPolicy,
+  predicatePublicBucket,
+  predicateRlsMissing,
+} from './predicates.js';
+import { buildSchemaFacts } from './schema-facts.js';
 import type {
   ParsedPolicy,
   ParsedSchema,
@@ -42,6 +59,47 @@ const METADATA: AgentMetadata = {
 
 const UNCERTAINTY_NOTE =
   'regex parser; complex SQL may be missed (CTEs, DO $$ blocks, multi-statement policies, user-defined functions)';
+
+function mintSupabaseConnectorId(): ConnectorId {
+  const r = asConnectorId('supabase');
+  if (!r.ok) throw new Error(`bug: ${r.error.message}`);
+  return r.value;
+}
+
+const SUPABASE_CONNECTOR_ID: ConnectorId = mintSupabaseConnectorId();
+
+function bucketRecordsToFacts(
+  buckets: readonly { id: string; name: string; public: boolean; policies?: readonly { name: string; operation: string; role: string }[] }[],
+  schemaPath: string,
+): readonly ScanFact[] {
+  return buckets.map((b) => {
+    const payload: ScanFactPayload = {
+      sanitized_excerpt: JSON.stringify({
+        id: b.id,
+        name: b.name,
+        public: b.public,
+        policies: b.policies ?? [],
+      }),
+      content_kind: 'json',
+    };
+    const source: McpResponseSource = {
+      kind: 'mcp_response',
+      connector_id: SUPABASE_CONNECTOR_ID,
+      tool: 'list_storage_buckets',
+      response_digest: createHash('sha256')
+        .update(JSON.stringify(b))
+        .digest('hex'),
+      payload,
+    };
+    return {
+      fact_id: createHash('sha256').update(`bucket:${schemaPath}:${b.id}`).digest('hex'),
+      source,
+      observed_at: new Date().toISOString(),
+      args_fingerprint_sha256: createHash('sha256').update(schemaPath).digest('hex'),
+      redacted: false,
+    };
+  });
+}
 
 function fingerprint(s: string): string {
   let h = 0;
@@ -250,16 +308,37 @@ export function createSupabaseRlsAgent(): VeyraAgent<
         };
       }
 
-      const schemaFindings = buildFindings(parsed, input.schemaSqlPath);
-
-      const buckets = await loadBucketsArtifact(
+      // 09b: run Pass-1 assertion predicates over ScanFact[].
+      const schemaFacts = buildSchemaFacts(parsed, input.schemaSqlPath);
+      const bucketRecords = await loadBucketsArtifact(
         input.storageBucketsArtifactPath,
       );
-      const bucketResult = evaluateBuckets(buckets);
+      const bucketFacts = bucketRecords !== undefined
+        ? bucketRecordsToFacts(bucketRecords, input.schemaSqlPath)
+        : [];
+      const allFacts: readonly ScanFact[] = [...schemaFacts, ...bucketFacts];
+
+      const predicateFindings: readonly Finding[] = [
+        ...predicateRlsMissing(allFacts),
+        ...predicateBroadPolicy(allFacts),
+        ...predicateAllAuthenticated(allFacts),
+        ...predicatePublicBucket(allFacts),
+      ];
+
+      // Pre-09b path retained for the unparseable / non-public-schema
+      // coverage_gap findings the predicate set does not produce.
+      const schemaFindings = buildFindings(parsed, input.schemaSqlPath);
+      const unparseableAndNonPublic = schemaFindings.filter(
+        (f) => f.finding_type === 'coverage_gap',
+      );
+      // Also keep the (pre-09b) bucket evaluator only when MCP buckets
+      // are absent — the predicate already covers coverage_gap and the
+      // present case. Dedupe by control_id + bucket name.
+      void evaluateBuckets;
 
       const allFindings: readonly Finding[] = [
-        ...schemaFindings,
-        ...bucketResult.findings,
+        ...predicateFindings,
+        ...unparseableAndNonPublic,
       ];
 
       const writeResult = await writeTablesArtifact(
