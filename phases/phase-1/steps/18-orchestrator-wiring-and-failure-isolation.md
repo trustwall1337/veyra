@@ -1,6 +1,6 @@
 # Step 18 — Orchestrator wiring + failure isolation
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 2 completion`, §4.0 architecture rules
 **Produces:** `src/core/orchestrator/scan-orchestrator.ts` (complete)
 **Depends on:** 08, 09, 10, 11, 12, 14, 17
