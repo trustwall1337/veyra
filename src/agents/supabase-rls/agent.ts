@@ -35,7 +35,6 @@ import type {
 } from '../../types/scan-fact.js';
 
 import { loadBucketsArtifact, evaluateBuckets } from './buckets.js';
-import { classifyTable } from './heuristics.js';
 import { parseSchemaSql } from './parser.js';
 import {
   predicateAllAuthenticated,
@@ -45,7 +44,6 @@ import {
 } from './predicates.js';
 import { buildSchemaFacts } from './schema-facts.js';
 import type {
-  ParsedPolicy,
   ParsedSchema,
   SupabaseRlsInput,
   SupabaseRlsOutput,
@@ -101,40 +99,17 @@ function bucketRecordsToFacts(
   });
 }
 
-function fingerprint(s: string): string {
-  let h = 0;
-  for (let i = 0; i < s.length; i += 1) {
-    h = (h * 31 + s.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
-
-function looksOpenUsing(expr: string | undefined): boolean {
-  if (expr === undefined) return false;
-  const normalized = expr.replace(/\s+/g, ' ').trim().toLowerCase();
-  return normalized === 'true';
-}
-
-function policiesForTable(
-  schema: ParsedSchema,
-  schemaName: string,
-  tableName: string,
-): readonly ParsedPolicy[] {
-  return schema.policies.filter(
-    (p) => p.schema === schemaName && p.table === tableName,
-  );
-}
-
-function buildFindings(
-  schema: ParsedSchema,
-  schemaSqlPath: string,
-): readonly Finding[] {
+/**
+ * Coverage-gap builder. Post retro-09b f6 the pre-09b likely_issue
+ * builder is fully removed — predicates own that path. Only the
+ * coverage gaps the predicates cannot infer from facts remain here:
+ * non-public schemas (Phase 1 limit) and unparseable SQL blocks.
+ */
+function buildCoverageGapFindings(schema: ParsedSchema): readonly Finding[] {
   const findings: Finding[] = [];
 
   // Non-public schemas (Phase 1 limit): emit coverage_gap so they are
-  // never silently skipped. The parser may still produce table records
-  // for them; we record each as a manual-review item before the main
-  // loop below ignores them.
+  // never silently skipped.
   const seenNonPublic = new Set<string>();
   for (const table of schema.tables) {
     if (table.schema === 'public') continue;
@@ -153,90 +128,6 @@ function buildFindings(
       summary: `Phase 1 inspects only the public schema. Table "${key}" was not analyzed. Negative tests should be added once non-public schema coverage lands. ${UNCERTAINTY_NOTE}.`,
       evidence_refs: [],
     });
-  }
-
-  for (const table of schema.tables) {
-    if (table.schema !== 'public') continue;
-    const sensitivity = classifyTable(table.name);
-    // Evidence references are empty in step 09 — the assertion-predicate
-    // reshape in 09b will reference ScanFact.fact_id values (per revision
-    // §3.3 evidence_refs is fact-only).
-    const _refId = `supabase-schema:${schemaSqlPath}:${table.schema}.${table.name}:${fingerprint(JSON.stringify(table.source_range))}`;
-    void _refId;
-    const policies = policiesForTable(schema, table.schema, table.name);
-
-    // cc-11-5 and cc-11-6 require sensitivity (name-driven).
-    if (sensitivity.matched_via !== 'none') {
-      // cc-11-5 — sensitive table without ENABLE ROW LEVEL SECURITY.
-      if (!table.rls_enabled) {
-        findings.push({
-          id: `cc-11-5-${table.schema}.${table.name}`,
-          control_id: 'cc-11-5',
-          finding_type: 'likely_issue',
-          evidence_strength: sensitivity.strength,
-          reproducibility: 'static',
-          review_action: 'fix_before_launch',
-          blast_radius:
-            table.name === 'users' || table.name === 'accounts'
-              ? 'user_data'
-              : 'tenant_data',
-          title: `RLS appears missing on sensitive table "${table.schema}.${table.name}"`,
-          summary: `Table "${table.schema}.${table.name}" was identified as sensitive (${sensitivity.matched_via}${sensitivity.pattern_label !== undefined ? ` "${sensitivity.pattern_label}"` : ''}) but no ENABLE ROW LEVEL SECURITY statement was found. This appears launch-blocking; needs human review. ${UNCERTAINTY_NOTE}.`,
-          evidence_refs: [],
-        });
-      }
-
-      // cc-11-6 — CREATE POLICY … USING (true) on sensitive table.
-      for (const p of policies) {
-        if (looksOpenUsing(p.using_expr)) {
-          findings.push({
-            id: `cc-11-6-${table.schema}.${table.name}-${p.name}`,
-            control_id: 'cc-11-6',
-            finding_type: 'likely_issue',
-            evidence_strength: sensitivity.strength,
-            reproducibility: 'static',
-            review_action: 'fix_before_launch',
-            blast_radius:
-              table.name === 'users' || table.name === 'accounts'
-                ? 'user_data'
-                : 'tenant_data',
-            title: `Open policy "USING (true)" on sensitive table "${table.schema}.${table.name}"`,
-            summary: `Policy "${p.name}" on "${table.schema}.${table.name}" uses USING (true) — every row is visible regardless of identity. This appears launch-blocking; needs human review. ${UNCERTAINTY_NOTE}.`,
-            evidence_refs: [],
-          });
-        }
-      }
-    }
-
-    // cc-11-9 — CREATE POLICY ... TO authenticated USING (...) without a
-    // per-row check. The policy is structurally problematic regardless of
-    // table sensitivity. Strength is `high` on canonical-name tables,
-    // otherwise `medium`.
-    for (const p of policies) {
-      if (p.role === undefined) continue;
-      const roles = p.role.split(',').map((s) => s.trim().toLowerCase());
-      if (!roles.includes('authenticated')) continue;
-      const expr = (p.using_expr ?? '').toLowerCase();
-      const hasPerRow =
-        expr.includes('auth.') ||
-        expr.includes('current_setting') ||
-        (expr.includes('=') && expr.length > 4 && expr !== 'true');
-      if (!hasPerRow) {
-        findings.push({
-          id: `cc-11-9-${table.schema}.${table.name}-${p.name}`,
-          control_id: 'cc-11-9',
-          finding_type: 'likely_issue',
-          evidence_strength:
-            sensitivity.matched_via === 'exact_name' ? 'high' : 'medium',
-          reproducibility: 'static',
-          review_action: 'fix_before_launch',
-          blast_radius: 'tenant_data',
-          title: `Policy grants ${p.operation} on "${table.schema}.${table.name}" to authenticated without a per-row check`,
-          summary: `Policy "${p.name}" allows the authenticated role ${p.operation} on "${table.schema}.${table.name}", but the USING expression does not appear to constrain rows by identity (no auth.uid / current_setting / equality check). Any signed-in user appears to read the full table. Needs human review. ${UNCERTAINTY_NOTE}.`,
-          evidence_refs: [],
-        });
-      }
-    }
   }
 
   // Unparseable blocks → coverage_gap with manual-review reproducibility.
@@ -274,10 +165,26 @@ export function createSupabaseRlsAgent(): VeyraAgent<
       } catch (cause) {
         const m = cause instanceof Error ? cause.message : String(cause);
         context.logger.warn(`supabase-rls: cannot read schema ${input.schemaSqlPath}: ${m}`);
+        // Retro-09b f8: missing schema input is an observable coverage
+        // gap, not an agent failure. The scan continues; the report
+        // shows the gap to the reviewer.
         return {
-          status: 'failed',
+          status: 'completed',
           artifacts: [],
-          findings: [],
+          findings: [
+            {
+              id: 'cc-11-5-coverage-gap-schema-unreadable',
+              control_id: 'cc-11-5',
+              finding_type: 'coverage_gap',
+              evidence_strength: 'low',
+              reproducibility: 'manual_review_required',
+              review_action: 'review_before_launch',
+              blast_radius: 'unknown',
+              title: 'Supabase schema could not be read',
+              summary: `schema input at ${input.schemaSqlPath} could not be read: ${m}. RLS predicates could not run. Negative tests should be added once the schema is available. ${UNCERTAINTY_NOTE}.`,
+              evidence_refs: [],
+            },
+          ],
           warnings: [`schema_read_failed: ${m}`],
         };
       }
@@ -325,20 +232,15 @@ export function createSupabaseRlsAgent(): VeyraAgent<
         ...predicatePublicBucket(allFacts),
       ];
 
-      // Pre-09b path retained for the unparseable / non-public-schema
-      // coverage_gap findings the predicate set does not produce.
-      const schemaFindings = buildFindings(parsed, input.schemaSqlPath);
-      const unparseableAndNonPublic = schemaFindings.filter(
-        (f) => f.finding_type === 'coverage_gap',
-      );
-      // Also keep the (pre-09b) bucket evaluator only when MCP buckets
-      // are absent — the predicate already covers coverage_gap and the
-      // present case. Dedupe by control_id + bucket name.
+      // Retro-09b f6: only the coverage_gap-only builder remains for
+      // findings the fact-based predicates cannot infer (non-public
+      // schemas and unparseable SQL blocks).
+      const coverageGaps = buildCoverageGapFindings(parsed);
       void evaluateBuckets;
 
       const allFindings: readonly Finding[] = [
         ...predicateFindings,
-        ...unparseableAndNonPublic,
+        ...coverageGaps,
       ];
 
       const writeResult = await writeTablesArtifact(

@@ -11,9 +11,23 @@
  */
 
 import type { Finding } from '../../types/finding.js';
+import {
+  asConnectorId,
+  type ConnectorId,
+} from '../../types/identity.js';
 import type { ScanFact } from '../../types/scan-fact.js';
 
 import { classifyTable } from './heuristics.js';
+
+// Retro-09b f4: bucket fact validators must check the connector_id,
+// not just the tool name. A different connector could expose a tool
+// also named `list_storage_buckets`; only the Supabase one supplies
+// Supabase bucket state. The id is minted once at module load.
+const SUPABASE_CONNECTOR_ID: ConnectorId = (() => {
+  const r = asConnectorId('supabase');
+  if (!r.ok) throw new Error(`bug: ${r.error.message}`);
+  return r.value;
+})();
 
 const UNCERTAINTY_NOTE =
   'regex parser; complex SQL may be missed (CTEs, DO $$ blocks, multi-statement policies, user-defined functions)';
@@ -110,6 +124,11 @@ function unpackPolicyFact(fact: ScanFact): PolicyFact | null {
 function unpackBucketFact(fact: ScanFact): BucketFact | null {
   if (fact.source.kind !== 'mcp_response') return null;
   if (fact.source.tool !== 'list_storage_buckets') return null;
+  // Retro-09b f4: only accept bucket facts produced by the Supabase
+  // connector. A future connector exposing the same tool name (e.g.
+  // a forked Supabase fork or a competing Storage provider) must not
+  // be misclassified as Supabase bucket evidence.
+  if (fact.source.connector_id !== SUPABASE_CONNECTOR_ID) return null;
   try {
     const payload = JSON.parse(
       fact.source.payload?.sanitized_excerpt ?? '{}',
