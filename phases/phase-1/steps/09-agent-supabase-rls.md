@@ -1,6 +1,6 @@
 # Step 09 — Supabase schema parser + supabase-rls agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 6`, §4.4; `FINAL_PRODUCT_PLAN §11` checks 5, 6, 9, 12
 **Produces:** `src/agents/supabase-rls/` including the schema parser
 **Depends on:** 02, 04
