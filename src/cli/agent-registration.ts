@@ -67,11 +67,11 @@ export function registerPhase1Agents(
     }));
   }
 
-  // 4. authn (Layer 4 Pass-1 predicate). Reads tool-runner's
-  //    scan-facts artifact when present.
+  // 4. authn (Layer 4 Pass-1 predicate). Post retro-10b consumes
+  //    scan-facts.json via deterministic predicates.
   orch.register(createAuthnAgent(), (context: AgentExecutionContext) => ({
     projectRoot: context.projectRoot,
-    scannerFindingsArtifactPath: path.join(context.artifactDir, 'scan-facts.json'),
+    scanFactsArtifactPath: path.join(context.artifactDir, 'scan-facts.json'),
   }));
 
   // 5. authz-tenant (Layer 4 Pass-1 predicate). Post retro-11b

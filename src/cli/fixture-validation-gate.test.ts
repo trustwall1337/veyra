@@ -89,45 +89,112 @@ async function runGate(): Promise<{
     context,
   );
 
-  // 3. authn (with planted Semgrep findings JSON)
-  const semgrepJsonPath = path.join(context.artifactDir, 'scanner-findings.json');
+  // 3. Seed scan-facts.json (post-08b) with Semgrep matches and
+  //    Supabase schema_element table facts for fact-driven Pass-1.
+  //    Post retro-10b + retro-11b the authn/authz-tenant agents read
+  //    this artifact instead of walking source files.
+  const scanFactsPath = path.join(context.artifactDir, 'scan-facts.json');
+  const { asScannerId, asParserId } = await import('../types/identity.js');
+  const sid = asScannerId('semgrep');
+  if (!sid.ok) throw sid.error;
+  const pid = asParserId('supabase-schema');
+  if (!pid.ok) throw pid.error;
+  const scanFacts = [
+    {
+      fact_id: 'sg-authn-1',
+      source: {
+        kind: 'scanner_match',
+        scanner_id: sid.value,
+        payload: {
+          rule_id: 'rules.authz.client-side-only-guard',
+          sanitized_excerpt: 'if (!user) navigate("/login")',
+          content_kind: 'text',
+        },
+      },
+      file_path: 'src/App.tsx',
+      line: 22,
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: 'x',
+      redacted: false,
+    },
+    {
+      fact_id: 'sg-authn-2',
+      source: {
+        kind: 'scanner_match',
+        scanner_id: sid.value,
+        payload: {
+          rule_id: 'rules.authz.admin-route',
+          sanitized_excerpt: '<Route path="/admin"',
+          content_kind: 'text',
+        },
+      },
+      file_path: 'src/App.tsx',
+      line: 53,
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: 'x',
+      redacted: false,
+    },
+    {
+      fact_id: 'sg-authz-1',
+      source: {
+        kind: 'scanner_match',
+        scanner_id: sid.value,
+        payload: {
+          rule_id: 'rules.authz.direct-object-access-by-id',
+          sanitized_excerpt: "supabase.from('orders').select('*').eq('id', orderId)",
+          content_kind: 'text',
+        },
+      },
+      file_path: 'src/pages/Orders.tsx',
+      line: 30,
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: 'x',
+      redacted: false,
+    },
+    {
+      fact_id: 'sg-authz-2',
+      source: {
+        kind: 'scanner_match',
+        scanner_id: sid.value,
+        payload: {
+          rule_id: 'rules.authz.client-tenant-id',
+          sanitized_excerpt: "supabase.from('documents').eq('tenant_id', params.get('tenant_id'))",
+          content_kind: 'text',
+        },
+      },
+      file_path: 'src/pages/Dashboard.tsx',
+      line: 41,
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: 'x',
+      redacted: false,
+    },
+    {
+      fact_id: 'tf-orders',
+      source: {
+        kind: 'schema_element',
+        parser_id: pid.value,
+        element_kind: 'table',
+        name: 'public.orders',
+      },
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: 'x',
+      redacted: false,
+    },
+  ];
   await fs.writeFile(
-    semgrepJsonPath,
-    JSON.stringify([
-      {
-        rule_id: 'authn.client-side-only-guard',
-        file_path: 'src/App.tsx',
-        line: 22,
-      },
-      {
-        rule_id: 'authn.admin-route-no-server-check',
-        file_path: 'src/App.tsx',
-        line: 53,
-      },
-    ]),
+    scanFactsPath,
+    JSON.stringify({ scan_facts: scanFacts }, null, 2),
   );
   const authn = createAuthnAgent();
   const authnR = await authn.run(
-    { projectRoot: FIXTURE_ROOT, scannerFindingsArtifactPath: semgrepJsonPath },
+    { projectRoot: FIXTURE_ROOT, scanFactsArtifactPath: scanFactsPath },
     context,
   );
 
-  // 4. authz-tenant (with supabase-tables artifact)
-  const tablesPath = path.join(context.artifactDir, 'supabase-tables.json');
-  await fs.writeFile(
-    tablesPath,
-    JSON.stringify({
-      tables: [
-        { name: 'orders' },
-        { name: 'documents' },
-        { name: 'users' },
-        { name: 'timezones' },
-      ],
-    }),
-  );
+  // 4. authz-tenant — consumes the same scan-facts.json (retro-11b).
   const authz = createAuthzTenantAgent();
   const authzR = await authz.run(
-    { projectRoot: FIXTURE_ROOT, supabaseTablesArtifactPath: tablesPath },
+    { projectRoot: FIXTURE_ROOT, scanFactsArtifactPath: scanFactsPath },
     context,
   );
 
