@@ -239,6 +239,42 @@ Three things are now explicit:
 - **AI context attaches via a separate field: `Finding.supporting_hypothesis_refs?: Hypothesis[]`.** When a hypothesis matches a finding (same `proposed_control_id`, overlapping facts), the disposition pass (§4) attaches the hypothesis here so the reporter can show "the AI also saw this; here is its reasoning." But the hypothesis is never counted as evidence; it is auxiliary commentary.
 - Absence of supporting AI is never reason to emit `missing_evidence`. Finding fields come from the predicate's verdict on facts.
 
+### 3.3b `RoleModel` (NEW artifact — input to authz test parameterisation)
+
+**Producer:** either the AI Inference Agent (§7.2, "inferred role-model" path) OR the operator (§7.5, "declared role-model" path via `test-actor-manifest.yaml`).
+**Consumers:** Phase 2 catalog tests (parameterise actor + target selection per control), `evidence-report` (renders the role model in the report Sources section so the user sees which roles were tested against which expectations).
+**Lives in:** `src/types/role-model.ts`, written to `role-model.json`.
+
+Shape (skeleton):
+
+```
+type RoleModel = {
+  roles: Record<RoleId, {
+    sources: Array<FactRef | 'operator_manifest'>
+    confidence: 'low' | 'medium' | 'high' | 'declared'   // 'declared' = from manifest
+    can_access_declared?: string[]                       // route/resource patterns
+    cannot_access_declared?: string[]
+    uncertainty_notes?: string
+  }>
+  tenancy: {
+    model: 'tenant_id_on_user_and_resource' | 'org_membership_join' | 'unknown'
+    sources: Array<FactRef | 'operator_manifest'>
+    scoped_resources?: string[]
+    user_tenant_column?: string
+    resource_tenant_column?: string
+    confidence: 'low' | 'medium' | 'high' | 'declared'
+  }
+  anon_capabilities_declared?: string[]
+}
+```
+
+**Two production paths:**
+
+- **Inferred** (default in `--auto-synthesize` sub-mode): AI Inference Agent reads `scan-facts.json` (schema, RLS policies, Semgrep role-detection rules, existing tests) + Lovable `auth_model` template response, produces the role model with per-field `confidence`. Treated as a hypothesis; the catalog tests still run against it, but the report renders the uncertainty.
+- **Declared** (default in `--test-actor-manifest` sub-mode): operator's manifest is the role model. `confidence: 'declared'` everywhere. Authoritative for active tests.
+
+**Precedence rule (when both sources exist):** the declared role model wins. AI inference is recorded in `role-model.json.inference_diff` for audit (showing what AI thought vs what the operator declared), but the test plan uses only the declared model.
+
 ### 3.4 `AIConcern` (NEW artifact for unasserted AI output)
 
 **Producer:** Assertion Layer (when a hypothesis exists but no predicate fires).

@@ -17,7 +17,7 @@ Implement the `AiProvider` interface from 02c using `@anthropic-ai/sdk`. Provide
 - `src/ai/anthropic.ts`:
   - Wraps `@anthropic-ai/sdk` client.
   - Default model: `claude-sonnet-4-6`. Configurable via `AiRequest.model_id`.
-  - Structured outputs via `output_config.format` with caller-provided zod schema; provider compiles into a token-level grammar.
+  - Structured outputs via `tools` + forced `tool_choice`. Define one tool `emit_structured_output` whose `input_schema` is the caller-provided JSON schema (zod 4 → JSON schema via `z.toJSONSchema(...)` on the call site, or hand-rolled JSON schema). Set `tool_choice: { type: 'tool', name: 'emit_structured_output' }` so Claude must return a `tool_use` block. The adapter then extracts the tool input, validates it locally against the same schema, and returns `parsed_output`. Schema violation returns `Result.err(AiProviderError { kind: 'schema_violation' })`. Anthropic-side shaping does not replace Veyra-side validation.
   - `cache_control: { type: 'ephemeral' }` on the system prompt + control-catalog blocks. TTL configurable per request.
   - Returns `cache_read_input_tokens` and `cache_creation_input_tokens` in `AiResponse` for observability.
   - Writes a `scan-actions.log` entry per call: `{ action_id: 'ai_call', model_id, prompt_fingerprint_sha256, input_tokens, output_tokens, cache_hit_ratio, duration_ms, outcome }`.

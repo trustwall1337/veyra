@@ -1180,19 +1180,44 @@ enough for early design partners. Detailed plan:
 
 ### Add (capability)
 
-- `--mode sandbox_active_validation` actually works
+- `--mode sandbox_active_validation` actually works, in **two sub-modes**:
+  - **B.1 manifest mode (preferred first path):** operator pre-creates
+    test users in their sandbox project and declares them in
+    `test-actor-manifest.yaml`. Veyra signs in as each actor, runs the
+    catalog tests. No service-role key required. No mutation by Veyra.
+  - **B.2 auto-synthesize mode:** Veyra creates synthetic users + data
+    via Supabase Admin SDK, tests, cleans up. Higher automation, larger
+    trust surface.
 - `SandboxExecutor` behind the `ActionExecutor` interface introduced in
-  Phase 1's policy types
+  Phase 1's policy types (auto-synthesize sub-mode only)
+- `test-actor-manifest-reader` agent (manifest sub-mode)
 - Synthetic identity / tenant / record creation via Supabase Admin SDK
+  (auto-synthesize sub-mode only)
 - Negative-test catalog (cross-tenant read, client-tenant_id override,
-  anon-to-private-bucket, non-admin-to-admin-route, etc.)
-- Cleanup machinery with verifiable residual count
-- AI provider adapter (Anthropic + OpenAI) actually wired
+  anon-to-private-bucket, non-admin-to-admin-route, plus `cc-11-13a..e`
+  PostgREST query-surface checks — `select=*` column leaks, cross-tenant
+  filter bypass via PostgREST operators, foreign-table embed leaks,
+  OpenAPI table enumeration, private-column filter enumeration)
+- `role-model.json` artifact — declared (from manifest) or inferred
+  (AI Inference Agent); declared wins for active-test parameterisation
+- Cleanup machinery with verifiable residual count (auto-synthesize only)
+- AI provider adapter (Anthropic from Phase 1 revision + OpenAI from
+  Phase 2 step 04) actually wired
 - `ai-explainer` agent for sanitized, structured-output explanations
 - New evidence kinds emitted at runtime: `active_validation`,
   `cleanup_proof`
-- New readiness status emitted: `proven_in_sandbox`
-- Approval flow (interactive + signed-file CI path)
+- New readiness status emitted: `proven_in_sandbox` — **requires the
+  full `required_scenario_set` per control to be `proven_denial`**, not
+  a single denial. Partial denials are recorded as "tested scenario
+  denied" in the report; they do not upgrade readiness.
+- Approval flow (interactive + signed-file CI path), with sub-mode-
+  specific approval scope
+
+### Out of scope for Phase 2 (deferred)
+
+- Active SQL-injection testing — see Phase 5 "controlled offensive
+  validation workflows." Phase 2 uses **static detection only** for
+  SQL-construction risks (Semgrep rules in Phase 1 step 07).
 
 ### Add (polish — design partners)
 
@@ -1289,9 +1314,9 @@ Become a broader continuous product-security control assurance platform.
 - cloud/runtime connectors
 - SIEM integrations
 - approval workflows
-- safe live-product validation
+- safe live-product validation (the `approved_production_safe` validation mode)
 - compliance evidence support
-- controlled offensive validation workflows
+- **controlled offensive validation workflows** — this is where active SQL-injection testing lives, if it ever ships. Constraints if added: sandbox/staging projects only, never production by default; explicit `--enable-injection-tests` flag with its own approval gate; strict non-destructive payload allowlist (no `DROP`, no `DELETE`, no `UPDATE`); per-test rate limit; full audit-log entries per payload; ability for the operator to revoke mid-scan. The default product never sends injection payloads. Phase 1 / Phase 2 use **static detection only** for SQL-construction risks (Semgrep rules for string-concatenated SQL, unsafe `.rpc()` arg flow, dynamic table names from user input). The PostgREST query-surface checks at `cc-11-13` are **not** SQL injection — they use legitimate Supabase API operators only.
 
 ### Success criteria
 

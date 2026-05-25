@@ -41,7 +41,7 @@ Replace the Phase 1 step 13 placeholders. Render `active_validation` and `cleanu
 
 - Per `§9` (Phase 1 + Phase 2 extensions): every string passes language lint. Allowed-claims vocabulary only.
 - Per `§10.5`: AI outputs with `confidence: 'low'` render under a distinct subheading, never mixed with high-confidence enrichments.
-- Per `§9` Phase 2 additions: `proven_in_sandbox` is rendered as "the control denied the test actor in scenario X" — never as "the control is secure."
+- Per `§9` Phase 2 additions: rendering distinguishes scenario-level from control-level claims. Per-scenario `proven_denial` renders as "this specific scenario was denied" (note the singular). `proven_in_sandbox` (a readiness state on the whole control card, not on individual scenarios) renders as "all required scenarios for this control were denied in this sandbox run." Never "the control is secure," never "control proven," never any phrasing that implies generality beyond the scenarios actually tested.
 - Per `§11.4`: `scan-actions.log` is rendered as a summary (counts), not the full log. The full log is a separate artifact.
 - Per `FPP §2A` rule 6: renderers are registered per-`EvidenceKind`, not per-connector. Adding a new connector does not require editing any renderer.
 - Code-snippet rendering still redacts secret-like patterns per Phase 1 step 13.

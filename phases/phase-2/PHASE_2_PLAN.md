@@ -107,14 +107,18 @@ No change. Continues to be the default. Continues to work in every environment.
 
 ### Mode B — `sandbox_active_validation` (NEW)
 
-Activated by:
+Mode B has **two entry sub-modes**. The operator-manifest sub-mode is the **preferred first active-validation path** because it minimises Veyra's mutation surface; the auto-synthesize sub-mode is the more automated alternative once trust is established. The negative-test catalog and the runner are sub-mode-agnostic — they take "synthetic actors with roles" as input regardless of how those actors came to exist.
+
+#### Sub-mode B.1 — `--test-actor-manifest <path>` (preferred first path)
+
+The operator pre-creates test users in the sandbox project and provides a manifest declaring each actor's email, password env-var name, role, tenant_id, and owned resources. Veyra reads the manifest, signs in as each actor via `auth.signInWithPassword`, and runs the catalog tests. **Veyra does not create users or test data in this sub-mode** — mutation is operator-controlled.
 
 ```
 veyra scan \
   --mode sandbox_active_validation \
   --env <local|dev|preview|staging|sandbox> \
   --supabase-sandbox <project_ref> \
-  --supabase-service-role-key <env_var_name> \
+  --test-actor-manifest ./test-actors.yaml \
   --approve-active \
   --project <path>
 ```
@@ -122,16 +126,46 @@ veyra scan \
 Mandatory at parse time:
 
 - `--env` is not `production`.
-- `--supabase-sandbox <project_ref>` is set. The project_ref must differ from any read-only Supabase project the scan would otherwise read.
-- `--supabase-service-role-key` names an environment variable. The key itself is never accepted on the command line.
-- `--approve-active` is present. The CLI also prompts interactively for a typed confirmation (`yes-i-understand-this-mutates-sandbox`) unless `--ci` is set, in which case the approval must come from a signed approval file.
+- `--supabase-sandbox <project_ref>` is set.
+- `--test-actor-manifest <path>` points at a readable YAML file.
+- Manifest schema validates: each actor has email, password env-var name, role, tenant_id; each role has `can_access` / `cannot_access` declarations.
+- `--approve-active` is present (or signed approval file in `--ci`).
+
+**No service-role key required.** Smaller trust surface. Per `PHASE_2_PLAN §11.1` the approval scope is correspondingly narrower (the operator owns the users; Veyra only signs in and exercises).
+
+#### Sub-mode B.2 — `--auto-synthesize` (full automation)
+
+Veyra creates synthetic users + resources via the Supabase Admin API, runs the catalog tests, and deletes them on cleanup. Requires the service-role key. Higher automation, larger trust surface.
+
+```
+veyra scan \
+  --mode sandbox_active_validation \
+  --env <local|dev|preview|staging|sandbox> \
+  --supabase-sandbox <project_ref> \
+  --supabase-service-role-key <env_var_name> \
+  --auto-synthesize \
+  --approve-active \
+  --project <path>
+```
+
+Mandatory at parse time:
+
+- All B.1 requirements except `--test-actor-manifest`.
+- `--supabase-service-role-key` names an env var. The key itself is never accepted on the command line.
+- `--auto-synthesize` is explicit (the flag exists so the operator cannot accidentally enter this sub-mode by forgetting the manifest).
+
+#### Common to both sub-modes
+
+`--approve-active` is required. The CLI prompts interactively for a typed confirmation (`yes-i-understand-this-mutates-sandbox`) unless `--ci` is set, in which case the approval must come from a signed approval file. Approval-file scope must match the sub-mode (a manifest-mode approval cannot authorize auto-synthesize, and vice versa).
 
 Runtime behavior:
 
-1. CLI validates the policy and writes a `scan-plan.json` artifact (per §3.1).
+1. CLI validates the policy and the sub-mode-specific inputs, writes a `scan-plan.json` artifact (per §3.1).
 2. CLI shows the plan to the user and waits for confirmation, OR reads the signed approval file when `--ci`.
 3. Scan proceeds through the five-phase active flow in §3.
-4. On any cleanup failure, scan exits non-zero with a residual report; no `proven_in_sandbox` claims are emitted.
+   - **Manifest sub-mode (B.1):** skips Synthesize entirely. After Exercise, there is **no Cleanup phase** — Veyra never created any resources in this sub-mode. Instead, a **Session Discard** step zeroes the in-memory JWTs and writes a `cleanup-proof.json` with `created_count: 0`, `deleted_count: 0`, `residual_count: 0`, `mode: 'session_discard'` so the audit spine is uniform with auto-synthesize. The operator-managed test users persist between scans; cleanup of those is the operator's responsibility, not Veyra's.
+   - **Auto-synthesize sub-mode (B.2):** runs all five phases including the data Cleanup with bounded auto-retry (`§11.3`).
+4. On any auto-synthesize cleanup failure, scan exits non-zero with a residual report; no `proven_in_sandbox` claims are emitted. Manifest sub-mode has no equivalent failure path because Veyra never wrote data — Session Discard is in-process state cleanup only.
 
 ### Mode C — `approved_production_safe` (still deferred)
 
@@ -161,7 +195,7 @@ Every Phase 2 scan in Mode B passes through five phases in order. Each phase has
 
 - `sandbox-runner` agent loads the test plan and runs each test against the application's actual endpoints (HTTP) or the Supabase data path (using the synthetic identity's JWT).
 - Each test produces an `ActiveValidationResult` with outcome `proven_denial | proven_allowed | inconclusive`.
-- A `proven_denial` is the strongest evidence Veyra can produce: it shows the application denied a specific synthetic actor under a specific synthetic scenario.
+- A `proven_denial` records that **one specific scenario was denied** for one synthetic actor at one point in time. It is direct evidence for that scenario — but **not for the control as a whole**. A control is proven only when every scenario in its `required_scenario_set` has a `proven_denial` (see `§5.2` readiness rules). One `proven_denial` is a useful data point; it is not a proof of the control.
 - A `proven_allowed` outcome on a sensitive endpoint is a `confirmed_issue` (direct evidence). This is the **only** Phase 2 path that legitimately emits `confirmed_issue`.
 
 ### 3.4 Cleanup
@@ -174,14 +208,14 @@ Every Phase 2 scan in Mode B passes through five phases in order. Each phase has
 ### 3.5 Prove
 
 - `evidence-report` agent (Phase 1's, extended) consumes `ActiveValidationResult[]` and `cleanup-proof.json`.
-- Controls with at least one `proven_denial` and a passing cleanup proof have their `readiness_status` upgraded from `evidence_present` (Phase 1) to `proven_in_sandbox` (Phase 2).
+- Controls whose `required_scenario_set` is fully covered by `proven_denial` outcomes (and a passing cleanup proof) have their `readiness_status` upgraded from `evidence_present` (Phase 1) to `proven_in_sandbox` (Phase 2). Partial coverage stays at the Phase 1 baseline; partial denials are still recorded in `active_validation_results` and rendered in the report as "tested scenario denied" entries — not as proven controls.
 - Controls with `proven_allowed` outcomes are recorded as `confirmed_issue + fix_before_launch` and produce a `launch_blocker`.
 
 ---
 
 ## §4 Agent Architecture Updates
 
-Phase 1's seven agents continue to run on every scan. Phase 2 adds three new agents and extends three existing ones.
+Phase 1's seven agents continue to run on every scan. Phase 2 adds several new agents/modules and extends several existing ones — exact count grew during the AI-first revision. The current set of new components (no specific count claim; the manifest in `phase-2/steps/README.md` is the canonical source):
 
 **Per the AI-first revision** (`phases/phase-1/REVISION_AI_SHAPE.md`), Phase 2 also gains:
 
@@ -248,7 +282,8 @@ The discriminated union declared in `phase-1/steps/02-foundation-types-artifact-
 
 **Active evidence takes precedence over heuristic strength.** When a control has a `proven_denial` outcome (with verified cleanup) or a `proven_allowed` outcome, the readiness status is computed from active evidence first; heuristic-based blocker rules apply only when active evidence is absent. Step 10e implements the exact rule order; the summary:
 
-- `proven_in_sandbox` is emitted when: at least one `proven_denial` exists for the control AND `cleanup-proof.json` shows `residual_count: 0` AND no contradicting `proven_allowed`. This wins over a heuristic `likely_issue + evidence_strength: high + fix_before_launch` that would otherwise produce `launch_blocker` — direct evidence (the control DID deny the synthetic actor) overrides indirect inference.
+- `proven_in_sandbox` is emitted when: **EVERY scenario in the control's `required_scenario_set` produced `proven_denial`** AND `cleanup-proof.json.residual_count === 0` AND no `proven_allowed` exists for any scenario of that control. **A single `proven_denial` is NOT sufficient** — it's recorded in the report as "tested scenario denied," not as a proven control. The `required_scenario_set` per control is declared in `controls.ts` (e.g. `cc-11-3 direct-object-access` requires denials for `read-cross-tenant`, `update-cross-tenant`, and `delete-cross-tenant` scenarios).
+- `proven_in_sandbox` wins over a heuristic `likely_issue + evidence_strength: high + fix_before_launch` that would otherwise produce `launch_blocker` — but only when the full required set is satisfied. Partial coverage stays at the heuristic baseline.
 - `launch_blocker` is emitted on: any `proven_allowed` outcome (NEW Phase 2 — direct evidence path), OR any `confirmed_issue + fix_before_launch` (Phase 1, unchanged), OR any high-confidence `likely_issue + fix_before_launch` when no contradicting active outcome exists (Phase 1, refined).
 
 ### 5.3 New finding-classification rule (Phase 2 only)

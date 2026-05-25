@@ -1,6 +1,6 @@
 # Step 02c — AiProvider types + sanitization helpers (no SDK imports)
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §5.2 sanitization order, §5.3 prompt-injection guard, §7.2`; `PHASE_2_PLAN §10.3`
 **Amends Phase 1 step:** none — new step file
 **Produces:** types + helpers under `src/ai/` (no SDK imports)

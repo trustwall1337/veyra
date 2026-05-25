@@ -16,7 +16,7 @@ The single place where Phase 2 promotion happens. Take upstream agents' corrobor
 - Update `src/agents/evidence-report/controls.ts` to add entries for any Phase 2 controls that didn't exist in Phase 1, AND add `phase_2_active_supported: boolean` metadata so the planner test in step 07 can validate the catalog.
 - Update `src/agents/evidence-report/readiness.ts` with the new Phase 2 rules in this exact order. **Active evidence (`proven_denial` / `proven_allowed`) is evaluated BEFORE heuristic-based blocker rules**, because direct evidence trumps heuristic strength. Otherwise, a `proven_denial` on a high-confidence `likely_issue` would be mis-classified as a blocker even though the control was actively shown to deny the test actor.
   1. Any `ActiveValidationResult.outcome === 'proven_allowed'` for a sensitive control → promote underlying finding from `likely_issue` to `confirmed_issue + fix_before_launch` → `readiness_status: launch_blocker` (Phase 2, new — direct evidence). Wins over rules 3/4 below.
-  2. Any control with at least one `proven_denial` AND `cleanup-proof.json.residual_count === 0` AND no contradicting `proven_allowed` for that control → `readiness_status: proven_in_sandbox` (Phase 2, new — direct evidence). Wins over rules 3/4 even if heuristic strength was `high`.
+  2. **`proven_in_sandbox` requires the full required-scenario set**, NOT a single denial. A control is `proven_in_sandbox` if and only if: (a) every scenario in `controls.ts[control_id].required_scenario_set` produced outcome `proven_denial`, (b) `cleanup-proof.json.residual_count === 0`, (c) no scenario for that control produced `proven_allowed`. A single `proven_denial` is recorded as "tested scenario denied" in the report — NOT as a proven control. (Phase 2, new — direct evidence; wins over rules 3/4 only when the full set is satisfied.)
   3. Any `confirmed_issue + fix_before_launch` (without active contradiction) → `launch_blocker` (Phase 1, unchanged).
   4. Any `likely_issue + evidence_strength: high + fix_before_launch` (without active contradiction) → `launch_blocker` (Phase 1, unchanged).
   5. Any `coverage_gap` AND no contradicting evidence → `needs_review`.
@@ -27,7 +27,8 @@ The single place where Phase 2 promotion happens. Take upstream agents' corrobor
 
 - Unit tests cover each rule independently:
   - `proven_allowed` on a `cc-11-6` finding → `confirmed_issue` + `launch_blocker`
-  - `proven_denial` on a `cc-11-5` finding (RLS-on variant) + `residual_count: 0` → `proven_in_sandbox` **even if the underlying heuristic strength was `high`** (rule-2-wins-over-rule-4 test)
+  - `proven_denial` on EVERY scenario in `cc-11-5.required_scenario_set` + `residual_count: 0` → `proven_in_sandbox` **even if the underlying heuristic strength was `high`** (rule-2-wins-over-rule-4 test, full-coverage variant)
+  - `proven_denial` on ONLY ONE of the required scenarios → readiness stays at the Phase 1 baseline (NOT `proven_in_sandbox`); the partial denial is recorded as "tested scenario denied" in the report's `active_validation_results` but does not upgrade readiness
   - `proven_denial` on `cc-11-5` BUT `residual_count: 5` → NOT `proven_in_sandbox` (cleanup failed)
   - `proven_allowed` AND `proven_denial` both present for same control → `confirmed_issue + launch_blocker` (rule 1 wins, contradiction noted in uncertainty_notes)
   - `inconclusive` outcome → no promotion, control stays at the Phase 1 classification
@@ -38,7 +39,7 @@ The single place where Phase 2 promotion happens. Take upstream agents' corrobor
 ## Guardrails
 
 - Promotion path is exclusively rule 1 above (a `proven_allowed` outcome). AI never promotes. Heuristics never promote on their own.
-- `proven_in_sandbox` requires BOTH `proven_denial` AND `residual_count: 0`. Cleanup failure means no `proven_in_sandbox` claims — per `§11.3`.
+- `proven_in_sandbox` requires (a) `proven_denial` on the FULL `required_scenario_set` for the control, (b) `residual_count: 0`, (c) no `proven_allowed` for any scenario. Partial denials are not upgrades. Cleanup failure means no `proven_in_sandbox` claims — per `§11.3`.
 - `readiness_status` is computed deterministically. No AI input. No timestamps. Same upstream artifacts → same readiness output.
 - Agent reads from artifact store only. No imports from sibling agents.
 

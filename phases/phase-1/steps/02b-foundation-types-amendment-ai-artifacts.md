@@ -1,6 +1,7 @@
 # Step 02b — Foundation types amendment (AI artifacts)
 
-**Status:** not started
+**Status:** done (2026-05-25)
+**Amended by:** step 02c (2026-05-25) — `asSanitizedMessage` factory removed from `src/types/sanitized-message.ts`; the `SanitizedMessage` brand is now minted only by the private chokepoint inside `src/ai/sanitization.ts`. Brand contract from 02b's Done-When (line 32: "cannot be assigned from raw string") still holds.
 **Maps to:** `REVISION_AI_SHAPE.md §3, §5, §6 (interface stubs), §7.4`; `PHASE_1_PLAN §5 alignment note`; `FPP §10 alignment note`
 **Amends Phase 1 step:** 02
 **Produces:** new types in `src/types/`

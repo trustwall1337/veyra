@@ -22,7 +22,7 @@ Authn agent declares the no-auth-protected-route and non-admin-to-admin-route te
 
 - Fixture run with Mode B against the seeded frontend-only-protected route: `cc-11-1` → `proven_allowed` → upgraded.
 - Fixture run with Mode B against the seeded admin-without-server-check route: `cc-11-2` → `proven_allowed` → upgraded.
-- Fixture run against a server-check-present variant: `cc-11-2` → `proven_denial` → readiness `proven_in_sandbox`.
+- Fixture run against a server-check-present variant: `cc-11-2` → `proven_denial` for the tested scenario. Recorded in `active_validation_results.json` as "tested scenario denied." Readiness becomes `proven_in_sandbox` **only if `cc-11-2.required_scenario_set` in `controls.ts` is entirely covered by `proven_denial` outcomes** (and cleanup_proof passes). If `cc-11-2` requires only this one scenario, readiness upgrades; if it requires more scenarios (e.g. `non-admin-via-direct-route`, `non-admin-via-api-route`, `anonymous-to-admin-route`), partial coverage stays at the Phase 1 baseline.
 - Mode A behavior unchanged.
 
 ## Guardrails

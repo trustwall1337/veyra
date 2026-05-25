@@ -25,6 +25,12 @@ Wrap Semgrep behind an adapter and ship the first batch of custom rules. Phase 1
   - Client-side use of Supabase service-role key
   - Supabase client created with anon key but used for privileged operation
 - `rules/secrets/` — supplementary rules for non-credential secrets Gitleaks doesn't catch (e.g. hardcoded webhook URLs).
+- `rules/authz/sql-construction/` — **static** detection of risky SQL construction patterns. **NOT injection testing — pattern detection only.** Rules:
+  - `string-concat-sql.yaml` — string-concatenated SQL where user input appears inline
+  - `user-controlled-rpc-arg.yaml` — request input flowing into `supabase.rpc(<fn>, { <user_input> })`
+  - `dynamic-table-name.yaml` — `supabase.from(<variable>)` where the variable originates from request body/params
+  - `unsafe-raw-sql.yaml` — `.raw(...)` or `db.query(<template-with-user-input>)` patterns
+  These produce ScanFacts that downstream predicates classify as `likely_issue + high + fix_before_launch`. Active SQL-injection testing is **explicitly deferred** to a later phase (`FPP §17 Phase 5` "controlled offensive validation workflows") under strict guardrails. Phase 1 / Phase 2 do not send injection payloads.
 - Each rule has positive (`// ruleid:`) and negative (`// ok:`) cases in a single fixture co-located with the rule yaml (same directory, same basename, language-specific extension). This is `semgrep --test`'s built-in pairing convention; a separate `tests/` subdirectory would not be auto-discovered by `--test`.
 
 ## Done when
