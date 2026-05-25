@@ -90,23 +90,37 @@ function hypothesesForControl(
   findings: readonly Finding[],
   hypotheses: readonly Hypothesis[],
 ): readonly HypothesisRef[] {
+  // Primary path: trust Pass-2's `Finding.supporting_hypothesis_refs`
+  // (18b's disposition module is the authoritative attacher). When
+  // the orchestrator wires Pass-2 the findings arrive with refs
+  // already populated and this short-circuits.
+  const seen = new Set<string>();
+  const fromPass2: HypothesisRef[] = [];
+  for (const f of findings) {
+    if (f.control_id !== control.control_id) continue;
+    for (const ref of f.supporting_hypothesis_refs ?? []) {
+      if (seen.has(ref.hypothesis_id)) continue;
+      seen.add(ref.hypothesis_id);
+      fromPass2.push(ref);
+    }
+  }
+  if (fromPass2.length > 0) return fromPass2;
+
+  // Fallback path (direct composeReport() calls that bypass the
+  // orchestrator): exactly Pass-2 rule 1 — hypothesis.evidence_refs
+  // ⊆ Finding.evidence_refs AND proposed_control_id matches AND the
+  // hypothesis has at least one evidence_ref. Empty-ref hypotheses
+  // would land at rule 4/5 in Pass-2 (AIConcern), so they must not
+  // attach here either.
   if (findings.length === 0) return [];
-  // Pass-2 rule 1 (revision §4.2): hypothesis attaches when its
-  // proposed_control_id matches a Finding's control_id AND the
-  // hypothesis's evidence_refs are a subset of the Finding's
-  // evidence_refs. For Phase 1 we apply the looser proposed_control_id
-  // match; 18b's orchestrator can tighten the subset check when the
-  // assertions audit lands.
   const factSet = new Set<string>(findings.flatMap((f) => f.evidence_refs));
   const attached: HypothesisRef[] = [];
   for (const h of hypotheses) {
     if (h.proposed_control_id !== control.control_id) continue;
-    const refs = h.evidence_refs.map((r) => r.fact_id);
-    const allSubset = refs.every((r) => factSet.has(r));
-    // Allow attachment when there are no fact refs to compare against
-    // (hypothesis cites evidence not in this control's finding set);
-    // 18b will narrow as the orchestrator fills the assertions audit.
-    if (refs.length === 0 || allSubset) {
+    if (h.evidence_refs.length === 0) continue;
+    const allSubset = h.evidence_refs.every((r) => factSet.has(r.fact_id));
+    if (allSubset && !seen.has(h.hypothesis_id)) {
+      seen.add(h.hypothesis_id);
       attached.push({ hypothesis_id: h.hypothesis_id });
     }
   }
@@ -117,11 +131,15 @@ function aiConcernsForControl(
   control: ControlDefinition,
   aiConcerns: readonly AIConcern[],
   hypothesesById: ReadonlyMap<string, Hypothesis>,
-): readonly AIConcern[] {
-  return aiConcerns.filter((c) => {
+): readonly { concern_id: string }[] {
+  const refs: { concern_id: string }[] = [];
+  for (const c of aiConcerns) {
     const hyp = hypothesesById.get(c.originating_hypothesis_id);
-    return hyp?.proposed_control_id === control.control_id;
-  });
+    if (hyp?.proposed_control_id === control.control_id) {
+      refs.push({ concern_id: c.concern_id });
+    }
+  }
+  return refs;
 }
 
 function buildControlCard(

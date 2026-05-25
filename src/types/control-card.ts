@@ -1,8 +1,17 @@
-import type { AIConcern } from './ai-concern.js';
 import type { EvidenceItem } from './evidence.js';
 import type { Finding } from './finding.js';
 import type { HypothesisRef } from './hypothesis.js';
 import type { SuggestedTest } from './suggested-test.js';
+
+/**
+ * Lightweight reference to an `AIConcern` by id. Full records live in
+ * the `ai-concerns.json` artifact; control cards carry only the id so
+ * the report doesn't duplicate the advisory tier into the control-card
+ * artifact (revision §11 + step 14b).
+ */
+export interface AIConcernRef {
+  readonly concern_id: string;
+}
 
 /**
  * `proven_in_sandbox` is reserved for Phase 2 active validation. Phase 1
@@ -30,9 +39,11 @@ export interface ControlCard {
    */
   readonly supporting_hypothesis_refs?: readonly HypothesisRef[];
   /**
-   * AIConcerns linked to this control's `control_id` (revision §11
-   * three-tier model). Rendered under "AI-suggested areas for human
-   * review" — never mixed with `findings`. Added in step 14b.
+   * AIConcerns linked to this control's `control_id` by concern_id
+   * (full records in `ai-concerns.json`). Rendered under
+   * "AI-suggested areas for human review" — never mixed with
+   * `findings`. Added in step 14b; switched from embedded objects to
+   * refs per the 14b retro-review.
    */
-  readonly ai_concerns_for_this_control?: readonly AIConcern[];
+  readonly ai_concerns_for_this_control?: readonly AIConcernRef[];
 }
