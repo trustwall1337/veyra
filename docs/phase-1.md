@@ -134,3 +134,6 @@ report.
 - `docs/supabase-metadata-export.md` — what Supabase metadata Veyra
   reads, and how to export `schema.sql` if you prefer not to use MCP.
 - `docs/data-access-and-trust.md` — the trust model in plain language.
+- `docs/how-ai-fits.md` — the seven-layer architecture, the four
+  artifact types, the §12b opt-in matrix, and the ten trust-model
+  constraints.

@@ -1,6 +1,6 @@
 # Step 20b — Phase 1 docs amendment: "How AI fits"
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §10 step 20 row, §15 verdict`
 **Amends Phase 1 step:** 20
 **Produces:** docs amendments — `README.md` section + `docs/how-ai-fits.md`

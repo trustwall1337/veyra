@@ -79,3 +79,36 @@ Veyra is **not** designed as a binary `read_only=true/false` tool. From step 02 
 | 18 | `18-orchestrator-wiring-and-failure-isolation.md` | Orchestrator wiring + failure isolation |
 | 19 | `19-fixture-validation-gate.md` | End-to-end fixture validation gate |
 | 20 | `20-phase1-documentation.md` | Phase 1 documentation |
+
+## AI-first revision step files (`-b` amendments)
+
+The AI-first reshape landed as a set of `-b` amendments that supersede
+the originals listed above. The revision adds three layers (1b AI
+Product-Understanding, 1c declared-context composer, 3 AI Inference)
+and four artifact types (`ScanFact`, `Hypothesis`, `Finding`,
+`AIConcern`). Order below is the dependency order.
+
+| # | File | Title |
+|---|---|---|
+| 02b | `02b-foundation-types-amendment-ai-artifacts.md` | Foundation types — Hypothesis, AIConcern, ContextRequest, ScanFact, AssertionPredicate |
+| 02c | `02c-ai-provider-types-and-sanitization.md` | AiProvider interface + sanitization helpers + SanitizedMessage brand |
+| 02d | `02d-anthropic-adapter.md` | Anthropic adapter (default Phase 1 provider) |
+| 03b | `03b-cli-revision-ai-flags.md` | CLI revision: AI flags wired per §12b opt-in matrix |
+| 04b | `04b-fixture-expected-findings-and-ai-concerns.md` | Fixture sibling expected-ai-concerns.json + cross-ref tests |
+| 05b | `05b-scanner-gitleaks-emits-scanfacts.md` | Gitleaks adapter emits ScanFact[] |
+| 06b | `06b-scanner-osv-emits-scanfacts.md` | OSV adapter emits ScanFact[] |
+| 07b | `07b-scanner-semgrep-emits-scanfacts.md` | Semgrep adapter emits ScanFact[] with payload.rule_id |
+| 08b | `08b-tool-runner-scan-facts-migration.md` | Tool-runner clean break — scan_facts artifact only |
+| 08c | `08c-context-policy-evaluator.md` | ContextPolicyEvaluator standalone module |
+| 08d | `08d-ai-inference-agent.md` | AI Inference Agent (Hypothesis[] producer) |
+| 09b | `09b-supabase-rls-as-assertion-predicate.md` | supabase-rls reshape — Pass-1 predicates over ScanFact[] |
+| 10b | `10b-authn-as-assertion-predicate.md` | authn reshape — Pass-1 predicates |
+| 11b | `11b-authz-tenant-as-assertion-predicate.md` | authz-tenant reshape — Pass-1 predicates |
+| 12b | `12b-business-logic-as-assertion-predicate.md` | business-logic reshape — Pass-1 predicates |
+| 13b | `13b-reporter-three-tier-rendering.md` | Reporter three-tier rendering (Findings / AIConcerns / Active) |
+| 14b | `14b-evidence-report-with-new-artifacts.md` | evidence-report composes ScanFact + Hypothesis + Finding + AIConcern |
+| 17b | `17b-deterministic-bootstrap-inventory.md` | Deterministic Bootstrap Inventory (Layer 1) |
+| 17c | `17c-ai-product-understanding-and-declared-context-builder.md` | AI Product-Understanding + declared-context composer (Layers 1b + 1c) |
+| 18b | `18b-orchestrator-seven-layer-routing-and-pass-2-disposition.md` | Seven-layer orchestrator + Pass-2 disposition + parallel batching |
+| 19b | `19b-fixture-gate-three-tier-and-assertion-replay.md` | Fixture gate — three-tier output + --no-ai parity + replay determinism |
+| 20b | `20b-phase1-docs-amendment-how-ai-fits.md` | Docs amendment — "How AI fits" |
