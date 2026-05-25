@@ -2,7 +2,7 @@ export interface AuthzTenantInput {
   readonly projectRoot: string;
   readonly scanFactsArtifactPath?: string;
   readonly supabaseTablesArtifactPath?: string;
-  /** @deprecated Pre-08b name; superseded by scanFactsArtifactPath. */
+  /** Pre-08b name; superseded by scanFactsArtifactPath. Kept for back-compat. */
   readonly scannerFindingsArtifactPath?: string;
 }
 

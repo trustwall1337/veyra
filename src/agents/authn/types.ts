@@ -7,7 +7,7 @@ export interface AuthnInput {
    * coverage_gap findings rather than a file walk.
    */
   readonly scanFactsArtifactPath?: string;
-  /** @deprecated Pre-08b name; superseded by scanFactsArtifactPath. */
+  /** Pre-08b name; superseded by scanFactsArtifactPath. Kept for back-compat. */
   readonly scannerFindingsArtifactPath?: string;
 }
 
