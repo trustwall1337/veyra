@@ -1,6 +1,10 @@
 # Step 11 — Authz / tenant-boundary agent
 
-**Status:** done (2026-05-25)
+**Status:** superseded by 11b (2026-05-25). The heuristics module from
+this step is retained as a regex reference for future Pass-2 hypothesis
+attachment. The runtime agent path was rewritten in 11b to consume
+`ScanFact[]` from `scan-facts.json` via deterministic predicates per
+revision §4.1.
 **Maps to:** `PHASE_1_PLAN §7 Task 11`, §4.3
 **Produces:** `src/agents/authz-tenant/`
 **Depends on:** 02, 04, 08, 09

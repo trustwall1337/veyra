@@ -1,6 +1,11 @@
 # Step 12 — Business-logic agent
 
-**Status:** done (2026-05-25)
+**Status:** superseded by 12b (2026-05-25). The checklist from this
+step is retained as the predicate registry. The runtime agent path was
+reshaped in 12b to expose `predicatesBusinessLogic()` as a Pass-1
+assertion predicate over `ScanFact[]` + declared-context, per revision
+§4.1. The original step's invariant (NEVER emits confirmed_issue) is
+preserved.
 **Maps to:** `PHASE_1_PLAN §7 Task 12`, §4.5
 **Produces:** `src/agents/business-logic/`
 **Depends on:** 02, 17

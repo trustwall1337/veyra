@@ -1,6 +1,10 @@
 # Step 10 — Authn agent
 
-**Status:** done (2026-05-25)
+**Status:** superseded by 10b (2026-05-25). The heuristics module from
+this step is retained as a regex reference for future Pass-2 hypothesis
+attachment by AI Inference. The runtime agent path was rewritten in 10b
+to consume `ScanFact[]` from `scan-facts.json` via deterministic
+predicates per revision §4.1.
 **Maps to:** `PHASE_1_PLAN §7 Task 10`, §4.2
 **Produces:** `src/agents/authn/`
 **Depends on:** 02, 04, 08
