@@ -15,11 +15,14 @@ The middle AI layer. Reads sanitized facts + declared context, produces `Hypothe
 ## What lands
 
 - `src/agents/ai-inference/agent.ts`:
-  - Reads `scan-facts.json` + `declared-context.json` (sanitized via 02c on entry to prompt construction).
-  - Calls `AiProvider.complete()` with a structured-output schema for `Hypothesis[]`.
-  - Writes `hypotheses.json`. Each hypothesis cites at least one `fact_id` from `scan-facts.json` in `evidence_refs`.
-  - Emits `context-requests.json` when a hypothesis needs more facts to firm up. Routes through 08c `ContextPolicyEvaluator` (the orchestrator at 18b owns the retry loop).
-  - Honours hypothesis budget: default 100, configurable via `--ai-hypothesis-budget`. When the budget is exhausted, the agent stops emitting and logs `budget_exhausted` to `scan-actions.log`.
+  - Exposes a `VeyraAgent` (`createAiInferenceAgent()`) constructed only when the orchestrator (18b) wires an `AiProvider` under the §12b opt-in matrix. The agent's `AgentResult.findings` is **always** the empty array (constraint 7), and the agent is not constructed at all under `--no-ai`.
+  - Reads `scan-facts.json` (required) and `declared-context.json` (optional) from `context.artifactDir`. Inputs are sanitized via 02c on entry to prompt construction.
+  - Calls `AiProvider.complete()` with a structured-output schema for `Hypothesis[]` that includes an optional `requires_context` field carrying `{ justification, args }` (one of the five revision §5 args shapes).
+  - **Local schema validator** runs after every provider response — independent of the provider's `response_schema` enforcement — rejecting unknown fields at the root, hypothesis, evidence-ref, and `requires_context` levels. Provider schema is a hint; the local validator is the gate.
+  - **Output redaction**: every AI-produced text field (`reasoning`, `uncertainty_notes`, `proposed_control_id`, `requires_context.justification`) is run through 02c `redactSecrets` before persistence, in addition to prompt-side sanitization. Hard rule: raw secrets must never appear in any artifact, even if the model echoes them.
+  - **Budget validation**: `hypothesisBudget` is a non-negative integer; default 100; passed in as an explicit agent input (the CLI step 03b parses `--ai-hypothesis-budget`, the orchestrator 18b forwards it). Negative or non-integer values are rejected at the agent boundary.
+  - Writes `hypotheses.json` (each hypothesis cites at least one `fact_id` from `scan-facts.json` in `evidence_refs`) and `context-requests.json` (always present, possibly empty array). The orchestrator (18b) routes context requests through 08c `ContextPolicyEvaluator` and owns the retry loop — the agent itself never calls the evaluator (constraint 5).
+  - When the budget is exhausted, the agent truncates emission and logs `budget_exhausted` to `scan-actions.log`.
   - Schema-violation retry: 2 retries with stricter schema-violation-correction prompt, then discard the batch and log.
 
 ## Done when

@@ -43,6 +43,10 @@ function basenameFor(kind: ArtifactKind): string {
       return 'veyra-report.md';
     case 'veyra_report_json':
       return 'veyra-report.json';
+    case 'hypotheses':
+      return 'hypotheses.json';
+    case 'context_requests':
+      return 'context-requests.json';
   }
 }
 
