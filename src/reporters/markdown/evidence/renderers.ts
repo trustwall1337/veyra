@@ -5,6 +5,7 @@
  * `assertExhaustive`.
  */
 
+import { redactSecrets } from '../../../ai/sanitization.js';
 import { assertExhaustive, type EvidenceItem } from '../../../types/evidence.js';
 import { STRINGS } from '../strings.js';
 
@@ -13,7 +14,13 @@ export function renderStaticCode(
 ): string {
   const where =
     e.line !== undefined ? `${e.file}:${String(e.line)}` : e.file;
-  const tail = e.excerpt !== undefined ? `\n\`\`\`\n${e.excerpt}\n\`\`\`` : '';
+  // Per step 13 Guardrails: secret-like patterns in code snippets
+  // must be redacted before persisting to the report. The reporter
+  // runs the 02c sanitizer on every excerpt, even though upstream
+  // agents typically already sanitize.
+  const safeExcerpt =
+    e.excerpt !== undefined ? (redactSecrets(e.excerpt) as string) : undefined;
+  const tail = safeExcerpt !== undefined ? `\n\`\`\`\n${safeExcerpt}\n\`\`\`` : '';
   return `- static-code: \`${where}\`${tail}`;
 }
 
@@ -26,7 +33,11 @@ export function renderMcpContext(
 export function renderScanner(
   e: Extract<EvidenceItem, { source: 'scanner' }>,
 ): string {
-  return `- scanner: \`${e.scanner as string}\`, finding_id=\`${e.finding_id}\``;
+  // Per step 13: scanner evidence renders a reference to the scanner
+  // findings artifact. The artifact for tool-runner output is
+  // `scan-facts.json` post-08b. We point at it by name rather than
+  // by path because the reporter is pure (no filesystem reads).
+  return `- scanner: \`${e.scanner as string}\`, finding_id=\`${e.finding_id}\` (see \`scan-facts.json\` for the full ScanFact)`;
 }
 
 export function renderActiveValidation(

@@ -112,6 +112,58 @@ function renderControlCards(report: ReadinessReport): string {
   return sections.join('\n').trim();
 }
 
+function renderDeclaredContextSection(): string {
+  return `${STRINGS.HEADING_DECLARED_CONTEXT}\n\n${STRINGS.CONTEXT_NO_CONTEXT_AVAILABLE}\n\nSee \`declared-context.json\` for the full declared context (purpose, user_roles, data_kinds, auth_model) when AI is opted in.`;
+}
+
+function renderObservedEvidenceSection(): string {
+  return `${STRINGS.HEADING_OBSERVED_EVIDENCE}\n\n${STRINGS.EVIDENCE_NO_EVIDENCE_AVAILABLE}\n\nSee \`inventory-bootstrap.json\` (deterministic file/route/dep evidence) and \`scan-facts.json\` (scanner-emitted facts) for the full observed evidence set.`;
+}
+
+function renderFindingsSection(report: ReadinessReport): string {
+  const allFindings: Finding[] = [];
+  for (const card of report.control_cards) {
+    for (const f of card.findings) allFindings.push(f);
+  }
+  if (allFindings.length === 0) {
+    return `${STRINGS.HEADING_FINDINGS}\n\n${STRINGS.FINDINGS_NONE}`;
+  }
+  const sections: string[] = [STRINGS.HEADING_FINDINGS, ''];
+  for (const f of allFindings) {
+    sections.push(renderFinding(f));
+    sections.push('');
+  }
+  return sections.join('\n').trimEnd();
+}
+
+function renderSuggestedTestsSection(report: ReadinessReport): string {
+  const allTestIds = new Set<string>();
+  for (const card of report.control_cards) {
+    for (const f of card.findings) {
+      for (const t of f.suggested_test_ids ?? []) allTestIds.add(t);
+    }
+  }
+  if (allTestIds.size === 0) {
+    return `${STRINGS.HEADING_SUGGESTED_TESTS}\n\n${STRINGS.SUGGESTED_TESTS_NONE}`;
+  }
+  const lines: string[] = [STRINGS.HEADING_SUGGESTED_TESTS, ''];
+  for (const t of Array.from(allTestIds).sort()) lines.push(`- ${t}`);
+  return lines.join('\n');
+}
+
+function renderUncertaintyNotesSection(report: ReadinessReport): string {
+  const allNotes = new Set<string>();
+  for (const card of report.control_cards) {
+    for (const n of card.uncertainty_notes) allNotes.add(n);
+  }
+  if (allNotes.size === 0) {
+    return `${STRINGS.HEADING_UNCERTAINTY_NOTES}\n\n${STRINGS.UNCERTAINTY_NOTES_NONE}`;
+  }
+  const lines: string[] = [STRINGS.HEADING_UNCERTAINTY_NOTES, ''];
+  for (const n of allNotes) lines.push(`- ${n}`);
+  return lines.join('\n');
+}
+
 function renderSourcesSection(options: MarkdownReportOptions): string {
   const lines: string[] = [STRINGS.HEADING_SOURCES, '', STRINGS.SOURCES_HEADER];
   if (options.aiConcerns === undefined) {
@@ -146,7 +198,13 @@ export function renderMarkdownReport(
     '',
     renderExecutiveSummary(report),
     '',
+    renderDeclaredContextSection(),
+    '',
+    renderObservedEvidenceSection(),
+    '',
     renderLaunchBlockers(report),
+    '',
+    renderFindingsSection(report),
   ];
   // Tier 2 is OMITTED entirely when AI is disabled (per step 13b
   // contract). The Sources section below carries the disabled note.
@@ -158,6 +216,10 @@ export function renderMarkdownReport(
   sections.push(renderActiveOutcomesSection());
   sections.push('');
   sections.push(renderControlCards(report));
+  sections.push('');
+  sections.push(renderSuggestedTestsSection(report));
+  sections.push('');
+  sections.push(renderUncertaintyNotesSection(report));
   sections.push('');
   sections.push(renderSourcesSection(options));
   return sections.join('\n').trimEnd() + '\n';
