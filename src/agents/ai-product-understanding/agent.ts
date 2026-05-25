@@ -128,6 +128,24 @@ function buildPrompt(inventory: InventoryBootstrap): SanitizedMessage {
   return redactSecrets(lines.join('\n'));
 }
 
+function isConfidenceTaggedString(v: unknown): v is { value: string; confidence: 'low' | 'medium' | 'high'; uncertainty_notes?: string } {
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as Record<string, unknown>;
+  if (typeof r['value'] !== 'string') return false;
+  if (r['confidence'] !== 'low' && r['confidence'] !== 'medium' && r['confidence'] !== 'high') return false;
+  if (r['uncertainty_notes'] !== undefined && typeof r['uncertainty_notes'] !== 'string') return false;
+  return true;
+}
+
+function isConfidenceTaggedStringList(v: unknown): v is { value: string[]; confidence: 'low' | 'medium' | 'high'; uncertainty_notes?: string } {
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as Record<string, unknown>;
+  if (!Array.isArray(r['value']) || !r['value'].every((x) => typeof x === 'string')) return false;
+  if (r['confidence'] !== 'low' && r['confidence'] !== 'medium' && r['confidence'] !== 'high') return false;
+  if (r['uncertainty_notes'] !== undefined && typeof r['uncertainty_notes'] !== 'string') return false;
+  return true;
+}
+
 function parseDeclaredIntent(
   response: AiResponse,
 ): Result<DeclaredIntent, AiProductUnderstandingError> {
@@ -143,9 +161,48 @@ function parseDeclaredIntent(
       ),
     );
   }
-  // Trust the schema-validated structure but project explicitly into
-  // the typed shape.
-  return ok(parsed as DeclaredIntent);
+  // Local schema validation per retro-17c: do not trust the
+  // provider's response_schema enforcement; re-validate every field
+  // before persisting. Reject unknown fields that look like
+  // injection attempts.
+  const allowed = new Set([
+    'purpose',
+    'user_roles',
+    'data_kinds',
+    'auth_model',
+  ]);
+  const intent: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!allowed.has(k)) {
+      // Unknown field — reject the whole response. Better to fall
+      // back to deterministic fallback than to persist provider noise.
+      return err(
+        new AiProductUnderstandingError(
+          `AI response contained an unexpected field "${k}"`,
+        ),
+      );
+    }
+    if (k === 'purpose' || k === 'auth_model') {
+      if (!isConfidenceTaggedString(v)) {
+        return err(
+          new AiProductUnderstandingError(
+            `AI response field "${k}" did not match the expected shape (string value + confidence + optional uncertainty_notes)`,
+          ),
+        );
+      }
+      intent[k] = v;
+    } else if (k === 'user_roles' || k === 'data_kinds') {
+      if (!isConfidenceTaggedStringList(v)) {
+        return err(
+          new AiProductUnderstandingError(
+            `AI response field "${k}" did not match the expected shape (string[] value + confidence + optional uncertainty_notes)`,
+          ),
+        );
+      }
+      intent[k] = v;
+    }
+  }
+  return ok(intent as DeclaredIntent);
 }
 
 export async function buildAiDeclaredIntent(
@@ -203,4 +260,82 @@ export async function writeAiDeclaredIntentArtifact(
       new AiProductUnderstandingError(`failed to write ${out}: ${m}`),
     );
   }
+}
+
+// ── Optional VeyraAgent wrapper ────────────────────────────────────
+// Registered only when an AiProvider is wired (the orchestrator skips
+// AI agents in --no-ai mode by not constructing them). The wrapper
+// makes the AI step independently registerable so the orchestrator
+// can list its trace separately and skip it cleanly.
+
+import type {
+  AgentExecutionContext,
+  AgentMetadata,
+  AgentResult,
+  VeyraAgent,
+} from '../../types/agent.js';
+import type { ArtifactRef } from '../../types/artifact.js';
+
+export interface AiProductUnderstandingInput {
+  readonly inventoryArtifactPath: string;
+  readonly provider: AiProvider;
+  readonly model: string;
+}
+
+export interface AiProductUnderstandingOutput {
+  readonly artifactPath: string;
+}
+
+const AGENT_METADATA: AgentMetadata = {
+  id: 'ai-product-understanding',
+  version: '0.1.0',
+  declared_dependencies: ['inventory-bootstrap.json'],
+};
+
+export function createAiProductUnderstandingAgent(): VeyraAgent<
+  AiProductUnderstandingInput,
+  AiProductUnderstandingOutput
+> {
+  return {
+    metadata: AGENT_METADATA,
+    async run(
+      input: AiProductUnderstandingInput,
+      context: AgentExecutionContext,
+    ): Promise<AgentResult<AiProductUnderstandingOutput>> {
+      const r = await buildAiDeclaredIntent({
+        inventoryArtifactPath: input.inventoryArtifactPath,
+        provider: input.provider,
+        model: input.model,
+      });
+      if (!r.ok) {
+        return {
+          status: 'completed',
+          artifacts: [],
+          findings: [],
+          warnings: [`ai_product_understanding_failed: ${r.error.message}`],
+        };
+      }
+      const w = await writeAiDeclaredIntentArtifact(context.artifactDir, r.value);
+      if (!w.ok) {
+        return {
+          status: 'completed',
+          artifacts: [],
+          findings: [],
+          warnings: [`ai_product_understanding_write_failed: ${w.error.message}`],
+        };
+      }
+      const artifact: ArtifactRef = {
+        scanId: context.scanId,
+        kind: 'evidence_inventory',
+        path: w.value,
+      };
+      return {
+        status: 'completed',
+        artifacts: [artifact],
+        findings: [],
+        warnings: [],
+        output: { artifactPath: w.value },
+      };
+    },
+  };
 }

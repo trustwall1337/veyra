@@ -92,7 +92,17 @@ describe('productUnderstandingAgent — no_ai path (default)', () => {
     );
     const parsed = JSON.parse(text) as Record<string, unknown>;
     expect(parsed['observed_evidence']).toBeDefined();
-    expect(parsed['declared_intent']).toEqual({});
+    // Per retro-17c: no-AI mode derives a low-confidence fallback
+    // intent from inventory hints. The fixture has Vite + supabase
+    // deps + recognisable route shapes, so we expect at least one
+    // field to be populated.
+    const intent = parsed['declared_intent'] as Record<string, unknown>;
+    expect(intent).toBeDefined();
+    // Every populated field must carry confidence: 'low'.
+    for (const v of Object.values(intent)) {
+      const f = v as { confidence?: string };
+      if (f.confidence !== undefined) expect(f.confidence).toBe('low');
+    }
   });
 });
 

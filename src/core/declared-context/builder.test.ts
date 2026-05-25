@@ -58,15 +58,43 @@ describe('buildDeclaredContext — happy path', () => {
     }
   });
 
-  it('builds a declared-context without AI input (--no-ai path)', async () => {
+  it('builds a declared-context without AI input (--no-ai path) — derives deterministic fallback intent', async () => {
     const dir = await tmpDir();
     const inv = path.join(dir, 'inv.json');
     await writeJson(inv, VALID_INVENTORY);
     const r = await buildDeclaredContext({ inventoryArtifactPath: inv });
     expect(isOk(r)).toBe(true);
     if (isOk(r)) {
-      expect(r.value.declared_intent).toEqual({});
+      // Per retro-17c: --no-ai mode derives a low-confidence intent
+      // from inventory hints rather than returning {} so the report
+      // still has something under the declared-intent tier.
+      // VALID_INVENTORY has framework=vite, so the purpose field
+      // should be populated with confidence: 'low'.
+      const intent = r.value.declared_intent as Record<string, unknown>;
+      expect(intent['purpose']).toBeDefined();
+      const purpose = intent['purpose'] as { confidence?: string };
+      expect(purpose.confidence).toBe('low');
       expect(r.value.sources).toHaveLength(1);
+    }
+  });
+
+  it('declared_intent stays {} when inventory carries no detectable hints', async () => {
+    const dir = await tmpDir();
+    const inv = path.join(dir, 'inv.json');
+    // observed_evidence with nothing but file_map / framework=unknown.
+    await writeJson(inv, {
+      observed_evidence: {
+        file_map: [],
+        routes: [],
+        framework: 'unknown',
+        env_declarations: [],
+      },
+      sources: [],
+    });
+    const r = await buildDeclaredContext({ inventoryArtifactPath: inv });
+    expect(isOk(r)).toBe(true);
+    if (isOk(r)) {
+      expect(r.value.declared_intent).toEqual({});
     }
   });
 });

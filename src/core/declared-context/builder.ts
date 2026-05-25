@@ -59,6 +59,92 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/**
+ * Deterministic fallback for `declared_intent` when AI is not opted
+ * into (or has no artifact). Pulls weak signals from
+ * `observed_evidence` so the report still has _something_ to show
+ * under the declared-intent tier. Every value is `confidence: 'low'`
+ * because no AI inference touched these.
+ */
+function deriveFallbackIntent(
+  evidence: Record<string, unknown>,
+): DeclaredIntent {
+  const intent: Record<string, unknown> = {};
+
+  const pkg = evidence['package_json_digest'] as
+    | { name?: unknown; dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+    | undefined;
+  const framework = evidence['framework'] as string | undefined;
+  const routes = Array.isArray(evidence['routes'])
+    ? (evidence['routes'] as string[])
+    : [];
+  const tables = (evidence['supabase_schema'] as { tables?: string[] } | undefined)?.tables ?? [];
+  const deps = {
+    ...(pkg?.dependencies ?? {}),
+    ...(pkg?.devDependencies ?? {}),
+  };
+
+  const pkgName = typeof pkg?.name === 'string' ? pkg.name : undefined;
+  if (pkgName !== undefined || framework !== undefined) {
+    const purposeBits: string[] = [];
+    if (pkgName !== undefined) purposeBits.push(`Project "${pkgName}"`);
+    if (framework !== undefined && framework !== 'unknown') {
+      purposeBits.push(`built on ${framework}`);
+    }
+    if (purposeBits.length > 0) {
+      intent['purpose'] = {
+        value: purposeBits.join(' '),
+        confidence: 'low',
+        uncertainty_notes:
+          'derived from inventory only (--no-ai fallback); not AI-inferred',
+      };
+    }
+  }
+
+  const roles = new Set<string>();
+  for (const r of routes) {
+    if (/admin/i.test(r)) roles.add('admin');
+    if (/dashboard|profile|account/i.test(r)) roles.add('user');
+  }
+  if (roles.size > 0) {
+    intent['user_roles'] = {
+      value: Array.from(roles).sort(),
+      confidence: 'low',
+      uncertainty_notes:
+        'derived from route patterns in inventory only (--no-ai fallback)',
+    };
+  }
+
+  const dataKinds = new Set<string>();
+  for (const t of tables) {
+    const low = t.toLowerCase();
+    if (/users|accounts|profile/.test(low)) dataKinds.add('user_profile');
+    if (/orders|invoices|payments|subscriptions/.test(low)) dataKinds.add('payment');
+    if (/documents|files|attachments/.test(low)) dataKinds.add('file');
+    if (/tenants|workspaces/.test(low)) dataKinds.add('tenant');
+  }
+  if ('stripe' in deps || '@stripe/stripe-js' in deps) dataKinds.add('payment');
+  if (dataKinds.size > 0) {
+    intent['data_kinds'] = {
+      value: Array.from(dataKinds).sort(),
+      confidence: 'low',
+      uncertainty_notes:
+        'derived from Supabase tables + deps in inventory only',
+    };
+  }
+
+  if ('@supabase/supabase-js' in deps) {
+    intent['auth_model'] = {
+      value: 'Supabase Auth (inferred from dependency only — not AI-inferred)',
+      confidence: 'low',
+      uncertainty_notes:
+        'derived from package.json dependency only (--no-ai fallback)',
+    };
+  }
+
+  return intent as DeclaredIntent;
+}
+
 export async function buildDeclaredContext(
   options: BuildDeclaredContextOptions,
 ): Promise<Result<DeclaredContext, ComposerError>> {
@@ -108,7 +194,15 @@ export async function buildDeclaredContext(
     },
   ];
 
-  let declaredIntent: DeclaredIntent = {};
+  // --no-ai fallback: derive declared_intent deterministically from
+  // inventory hints when the AI artifact is not provided. Per step
+  // 17c: "declared_intent falls back to the Lovable `send_message`
+  // raw responses (if MCP is enabled) or to a minimal filename-
+  // derived inference produced deterministically by the Bootstrap
+  // Inventory itself."
+  let declaredIntent: DeclaredIntent = deriveFallbackIntent(
+    inventory.observed_evidence as Record<string, unknown>,
+  );
 
   if (options.aiIntentArtifactPath !== undefined) {
     let aiText: string;
