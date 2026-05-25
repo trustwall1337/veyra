@@ -268,10 +268,15 @@ function wrapWithStderrCapture<
   };
 }
 
+interface SectionResult {
+  readonly section: ScannerSection;
+  readonly facts: readonly import('../../types/scan-fact.js').ScanFact[];
+}
+
 async function runGitleaksSection(
   projectPath: string,
   injected: GitleaksRunner | undefined,
-): Promise<ScannerSection> {
+): Promise<SectionResult> {
   const baseRunner: GitleaksRunner =
     injected ?? createDefaultSubprocessRunner();
   const capture = wrapWithStderrCapture(baseRunner);
@@ -282,51 +287,66 @@ async function runGitleaksSection(
     if (isErr(result)) {
       const err = result.error;
       if (err instanceof ScannerNotInstalledError) {
-        return buildSection({
+        return {
+          section: buildSection({
+            scannerId: GITLEAKS_ID,
+            stderrTail,
+            outcome: { kind: 'not_installed', message: err.message },
+          }),
+          facts: [],
+        };
+      }
+      return {
+        section: buildSection({
           scannerId: GITLEAKS_ID,
           stderrTail,
-          outcome: { kind: 'not_installed', message: err.message },
-        });
-      }
-      return buildSection({
+          outcome: { kind: 'error', message: err.message },
+        }),
+        facts: [],
+      };
+    }
+    return {
+      section: buildSection({
         scannerId: GITLEAKS_ID,
         stderrTail,
-        outcome: { kind: 'error', message: err.message },
-      });
-    }
-    return buildSection({
-      scannerId: GITLEAKS_ID,
-      stderrTail,
-      outcome: {
-        kind: 'ok',
-        findings: result.value.findings.map(normalizeGitleaks),
-      },
-    });
+        outcome: {
+          kind: 'ok',
+          findings: result.value.findings.map(normalizeGitleaks),
+        },
+      }),
+      facts: result.value.facts,
+    };
   } catch (e) {
     const stderrTail = scrubStderrForArtifact(capture.getStderr());
     const message = e instanceof Error ? e.message : String(e);
-    return buildSection({
-      scannerId: GITLEAKS_ID,
-      stderrTail,
-      outcome: { kind: 'error', message },
-    });
+    return {
+      section: buildSection({
+        scannerId: GITLEAKS_ID,
+        stderrTail,
+        outcome: { kind: 'error', message },
+      }),
+      facts: [],
+    };
   }
 }
 
 async function runOsvSection(
   lockfilePath: string | undefined,
   injected: OsvRunner | undefined,
-): Promise<ScannerSection> {
+): Promise<SectionResult> {
   if (lockfilePath === undefined) {
-    return buildSection({
-      scannerId: OSV_ID,
-      stderrTail: undefined,
-      outcome: {
-        kind: 'error',
-        message:
-          'lockfile path was missing; the dependency check was not performed',
-      },
-    });
+    return {
+      section: buildSection({
+        scannerId: OSV_ID,
+        stderrTail: undefined,
+        outcome: {
+          kind: 'error',
+          message:
+            'lockfile path was missing; the dependency check was not performed',
+        },
+      }),
+      facts: [],
+    };
   }
   const baseRunner: OsvRunner =
     injected ?? createDefaultSubprocessRunner();
@@ -338,34 +358,46 @@ async function runOsvSection(
     if (isErr(result)) {
       const err = result.error;
       if (err instanceof ScannerNotInstalledError) {
-        return buildSection({
+        return {
+          section: buildSection({
+            scannerId: OSV_ID,
+            stderrTail,
+            outcome: { kind: 'not_installed', message: err.message },
+          }),
+          facts: [],
+        };
+      }
+      return {
+        section: buildSection({
           scannerId: OSV_ID,
           stderrTail,
-          outcome: { kind: 'not_installed', message: err.message },
-        });
-      }
-      return buildSection({
+          outcome: { kind: 'error', message: err.message },
+        }),
+        facts: [],
+      };
+    }
+    return {
+      section: buildSection({
         scannerId: OSV_ID,
         stderrTail,
-        outcome: { kind: 'error', message: err.message },
-      });
-    }
-    return buildSection({
-      scannerId: OSV_ID,
-      stderrTail,
-      outcome: {
-        kind: 'ok',
-        findings: result.value.findings.map(normalizeOsv),
-      },
-    });
+        outcome: {
+          kind: 'ok',
+          findings: result.value.findings.map(normalizeOsv),
+        },
+      }),
+      facts: result.value.facts,
+    };
   } catch (e) {
     const stderrTail = scrubStderrForArtifact(capture.getStderr());
     const message = e instanceof Error ? e.message : String(e);
-    return buildSection({
-      scannerId: OSV_ID,
-      stderrTail,
-      outcome: { kind: 'error', message },
-    });
+    return {
+      section: buildSection({
+        scannerId: OSV_ID,
+        stderrTail,
+        outcome: { kind: 'error', message },
+      }),
+      facts: [],
+    };
   }
 }
 
@@ -373,17 +405,20 @@ async function runSemgrepSection(
   projectPath: string,
   rulesPath: string | undefined,
   injected: SemgrepRunner | undefined,
-): Promise<ScannerSection> {
+): Promise<SectionResult> {
   if (rulesPath === undefined) {
-    return buildSection({
-      scannerId: SEMGREP_ID,
-      stderrTail: undefined,
-      outcome: {
-        kind: 'error',
-        message:
-          'rules directory was missing; the static-analysis check was not performed',
-      },
-    });
+    return {
+      section: buildSection({
+        scannerId: SEMGREP_ID,
+        stderrTail: undefined,
+        outcome: {
+          kind: 'error',
+          message:
+            'rules directory was missing; the static-analysis check was not performed',
+        },
+      }),
+      facts: [],
+    };
   }
   const baseRunner: SemgrepRunner =
     injected ?? createDefaultSubprocessRunner();
@@ -398,34 +433,46 @@ async function runSemgrepSection(
     if (isErr(result)) {
       const err = result.error;
       if (err instanceof ScannerNotInstalledError) {
-        return buildSection({
+        return {
+          section: buildSection({
+            scannerId: SEMGREP_ID,
+            stderrTail,
+            outcome: { kind: 'not_installed', message: err.message },
+          }),
+          facts: [],
+        };
+      }
+      return {
+        section: buildSection({
           scannerId: SEMGREP_ID,
           stderrTail,
-          outcome: { kind: 'not_installed', message: err.message },
-        });
-      }
-      return buildSection({
+          outcome: { kind: 'error', message: err.message },
+        }),
+        facts: [],
+      };
+    }
+    return {
+      section: buildSection({
         scannerId: SEMGREP_ID,
         stderrTail,
-        outcome: { kind: 'error', message: err.message },
-      });
-    }
-    return buildSection({
-      scannerId: SEMGREP_ID,
-      stderrTail,
-      outcome: {
-        kind: 'ok',
-        findings: result.value.findings.map(normalizeSemgrep),
-      },
-    });
+        outcome: {
+          kind: 'ok',
+          findings: result.value.findings.map(normalizeSemgrep),
+        },
+      }),
+      facts: result.value.facts,
+    };
   } catch (e) {
     const stderrTail = scrubStderrForArtifact(capture.getStderr());
     const message = e instanceof Error ? e.message : String(e);
-    return buildSection({
-      scannerId: SEMGREP_ID,
-      stderrTail,
-      outcome: { kind: 'error', message },
-    });
+    return {
+      section: buildSection({
+        scannerId: SEMGREP_ID,
+        stderrTail,
+        outcome: { kind: 'error', message },
+      }),
+      facts: [],
+    };
   }
 }
 
@@ -499,18 +546,30 @@ function scannerFinding(
   };
 }
 
+/**
+ * Step 08b migration (clean break, AI-shape revision §9 Option B):
+ * tool-runner stops emitting `confirmed_issue` / `likely_issue` findings.
+ * Only `coverage_gap` findings are emitted (when a scanner did not
+ * complete). All other Finding emission lives in the assertion layer
+ * (09b–12b). The `ScanFact[]` aggregated from each scanner adapter is
+ * the new observation artifact (`scan_facts`).
+ */
 function findingsForSection(section: ScannerSection): Finding[] {
   if (section.status !== 'ok') {
     return [coverageGapFinding(section)];
   }
-  const out: Finding[] = [];
-  let idx = 0;
-  for (const f of section.findings) {
-    out.push(scannerFinding(section.scannerId, f, idx));
-    idx += 1;
-  }
-  return out;
+  return [];
 }
+
+// Functions retained for reference but unused after the 08b migration.
+// Each scanner adapter now produces `ScanFact[]` directly; the
+// assertion predicates (09b–12b) build Finding objects from those
+// facts. Keeping the helpers as unused suppresses dead-code style
+// churn in step 14 where coverage_gap classification still references
+// the per-scanner classification table.
+void scannerFinding;
+void evidenceRefFor;
+void controlIdForHit;
 
 export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
   metadata: {
@@ -523,7 +582,7 @@ export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
     input: ToolRunnerInput,
     context: AgentExecutionContext,
   ): Promise<AgentResult<ToolRunnerOutput>> {
-    const sections = await Promise.all([
+    const sectionResults = await Promise.all([
       runGitleaksSection(context.projectRoot, input.runners?.gitleaks),
       runOsvSection(input.lockfilePath, input.runners?.osv),
       runSemgrepSection(
@@ -533,7 +592,12 @@ export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
       ),
     ]);
 
-    const output: ToolRunnerOutput = { scannerSections: sections };
+    const sections = sectionResults.map((sr) => sr.section);
+    const scanFacts = sectionResults.flatMap((sr) => Array.from(sr.facts));
+    const output: ToolRunnerOutput = {
+      scannerSections: sections,
+      scanFacts,
+    };
 
     const findings: Finding[] = [];
     const warnings: string[] = [];
@@ -549,7 +613,7 @@ export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
     const store = createFsArtifactStore(context.artifactDir);
     const writeResult = await store.write(
       context.scanId,
-      'scanner_findings',
+      'scan_facts',
       output,
     );
 
@@ -558,7 +622,7 @@ export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
       artifacts.push(writeResult.value);
     } else {
       warnings.push(
-        `failed to persist scanner_findings artifact: ${writeResult.error.message}`,
+        `failed to persist scan_facts artifact: ${writeResult.error.message}`,
       );
     }
 

@@ -1,6 +1,6 @@
 # Step 08b — Tool-runner schema migration (clean break, Option B)
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §9 step 08 row, migration Option B, §12 ordering`
 **Amends Phase 1 step:** 08
 **Produces:** amended agent at `src/agents/tool-runner/` + downstream rewires (10b authn, 11b authz-tenant, 14b evidence-report, fixture `expected-findings.test.ts`)

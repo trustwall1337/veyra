@@ -31,7 +31,7 @@ describe('artifact-store', () => {
 
     const writeResult = await store.write(
       'scan-123',
-      'scanner_findings',
+      'scan_facts',
       findings,
     );
     if (isErr(writeResult)) {
@@ -45,7 +45,7 @@ describe('artifact-store', () => {
 
     expect(readResult.value.value).toEqual(findings);
     expect(readResult.value.ref.scanId).toBe('scan-123');
-    expect(readResult.value.ref.kind).toBe('scanner_findings');
+    expect(readResult.value.ref.kind).toBe('scan_facts');
   });
 
   it('refuses to overwrite an existing artifact (append-only)', async () => {

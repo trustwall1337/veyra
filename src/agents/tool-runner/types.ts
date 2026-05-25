@@ -2,6 +2,7 @@ import type { GitleaksRunner } from '../../scanners/gitleaks/types.js';
 import type { OsvRunner } from '../../scanners/osv/types.js';
 import type { SemgrepRunner } from '../../scanners/semgrep/types.js';
 import type { ScannerId } from '../../types/identity.js';
+import type { ScanFact } from '../../types/scan-fact.js';
 
 /**
  * Per-scanner outcome the tool-runner records into the
@@ -75,6 +76,16 @@ export interface ToolRunnerInput {
   };
 }
 
+/**
+ * Output shape after the 08b migration (AI-shape revision §9 Option B):
+ * tool-runner aggregates `ScanFact[]` from each scanner adapter and
+ * persists them as `scan-facts.json`. The per-scanner section list is
+ * preserved for the coverage_gap path (status === 'not_installed' /
+ * 'error') and for stderr persistence, but findings are no longer
+ * shaped here — assertion predicates in 09b–12b emit findings from
+ * `ScanFact[]`.
+ */
 export interface ToolRunnerOutput {
   readonly scannerSections: readonly ScannerSection[];
+  readonly scanFacts: readonly ScanFact[];
 }

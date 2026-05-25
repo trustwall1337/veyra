@@ -167,43 +167,30 @@ describe('toolRunnerAgent', () => {
     expect(semgrep.findings[0]?.ruleId).toBe('direct-object-access-by-id');
     expect(semgrep.findings[0]?.line).toBe(12);
 
-    // One Finding per scanner hit; no coverage_gap entries on the happy path.
-    expect(result.findings).toHaveLength(3);
-    expect(
-      result.findings.filter((f) => f.finding_type === 'coverage_gap'),
-    ).toHaveLength(0);
-    // Gitleaks defaults to confirmed_issue (direct deterministic evidence
-    // per FPP §11 row 8); evidence_refs must be populated.
-    const gitleaksFinding = result.findings.find(
-      (f) => f.id === 'tool-runner-gitleaks-0',
-    );
-    expect(gitleaksFinding?.finding_type).toBe('confirmed_issue');
-    expect(gitleaksFinding?.control_id).toBe('cc-11-8');
-    expect(gitleaksFinding?.evidence_refs).toHaveLength(1);
-    expect(gitleaksFinding?.evidence_refs[0]).toContain('src/lib/secrets.ts');
-    // OSV stays at likely_issue (per step 06 Guardrails).
-    const osvFinding = result.findings.find(
-      (f) => f.id === 'tool-runner-osv-0',
-    );
-    expect(osvFinding?.finding_type).toBe('likely_issue');
-    expect(osvFinding?.control_id).toBe('cc-11-10');
-    expect(osvFinding?.evidence_refs).toHaveLength(1);
-    // Semgrep stays at likely_issue; control_id is parsed from the rule's
-    // message prefix when present, falling back to cc-11-3 otherwise.
-    const semgrepFinding = result.findings.find(
-      (f) => f.id === 'tool-runner-semgrep-0',
-    );
-    expect(semgrepFinding?.finding_type).toBe('likely_issue');
-    expect(semgrepFinding?.control_id).toBe('cc-11-3');
-    expect(semgrepFinding?.evidence_refs).toHaveLength(1);
+    // Per step 08b (revision §9 Option B): tool-runner no longer emits
+    // confirmed_issue / likely_issue findings. Those are produced by the
+    // assertion predicates in steps 09b–12b. Only coverage_gap findings
+    // (when a scanner did not complete) come from this agent — the happy
+    // path therefore has zero findings.
+    expect(result.findings).toHaveLength(0);
 
-    // Artifact was written.
+    // The new artifact is scan-facts (revision §3.1). Each scanner
+    // adapter dual-emits its facts; tool-runner aggregates them.
     expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0]!.kind).toBe('scan_facts');
     const onDisk = await fs.readFile(result.artifacts[0]!.path, 'utf8');
     const parsed = JSON.parse(onDisk) as {
-      value: { scannerSections: unknown[] };
+      value: {
+        scannerSections: unknown[];
+        scanFacts: { fact_id: string; source: { kind: string } }[];
+      };
     };
     expect(parsed.value.scannerSections).toHaveLength(3);
+    expect(parsed.value.scanFacts.length).toBeGreaterThan(0);
+    // Each ScanFact carries `source.kind = 'scanner_match'`.
+    for (const f of parsed.value.scanFacts) {
+      expect(f.source.kind).toBe('scanner_match');
+    }
   });
 
   it('missing binary: one scanner returns coverage_gap, others still complete', async () => {

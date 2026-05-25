@@ -1,7 +1,9 @@
 export type ArtifactKind =
   | 'declared_context'
   | 'evidence_inventory'
-  | 'scanner_findings'
+  // `scan_facts` replaces the pre-revision `scanner_findings` artifact
+  // per AI-shape revision §9 Option B (clean break landing in step 08b).
+  | 'scan_facts'
   | 'control_cards'
   | 'veyra_report_json'
   | 'veyra_report_md';
