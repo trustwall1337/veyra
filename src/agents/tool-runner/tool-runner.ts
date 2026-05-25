@@ -16,7 +16,9 @@
  * `context.artifactDir`.
  */
 
-import { createFsArtifactStore } from '../../core/artifacts/artifact-store.js';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+
 import { redactSecrets } from '../../scanners/gitleaks/parser.js';
 import type {
   GitleaksFinding,
@@ -37,6 +39,7 @@ import type {
 } from '../../types/agent.js';
 import type { ArtifactRef } from '../../types/artifact.js';
 import { ScannerNotInstalledError } from '../../types/errors.js';
+import type { ScanFact } from '../../types/scan-fact.js';
 import type {
   BlastRadius,
   EvidenceStrength,
@@ -45,7 +48,7 @@ import type {
   ReviewAction,
 } from '../../types/finding.js';
 import { asScannerId, type ScannerId } from '../../types/identity.js';
-import { isErr } from '../../types/result.js';
+import { isErr, ok, err, type Result } from '../../types/result.js';
 
 import { createDefaultSubprocessRunner } from './runners.js';
 import type {
@@ -571,11 +574,49 @@ void scannerFinding;
 void evidenceRefFor;
 void controlIdForHit;
 
+export const SCAN_FACTS_ARTIFACT_NAME = 'scan-facts.json';
+
+/**
+ * Persist `{ scan_facts: ScanFact[] }` to `<artifactDir>/scan-facts.json`
+ * (no extra `scanId` segment, no `Artifact<T>` wrapper). Returns an
+ * `ArtifactRef` pointing at the written file.
+ *
+ * The shape consumed by every downstream predicate is the bare
+ * `{ scan_facts: [...] }` JSON — see e.g.
+ * `src/agents/authn/agent.ts::readScanFacts` and
+ * `src/agents/ai-inference/agent.ts::readScanFacts`, both of which
+ * read `parsed.scan_facts`, not `parsed.value.scan_facts`.
+ */
+export async function writeScanFactsArtifact(
+  artifactDir: string,
+  scanId: string,
+  scanFacts: readonly ScanFact[],
+): Promise<Result<ArtifactRef, Error>> {
+  const filePath = path.join(artifactDir, SCAN_FACTS_ARTIFACT_NAME);
+  try {
+    await fs.mkdir(artifactDir, { recursive: true });
+    // Step 21 retro f4: preserve the artifact-store's append-only
+    // invariant — refuse to overwrite an existing scan-facts.json
+    // within the same scan directory. A duplicate write within one
+    // scan id is always a caller bug.
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({ scan_facts: scanFacts }, null, 2),
+      { flag: 'wx' },
+    );
+    return ok({ scanId, kind: 'scan_facts', path: filePath });
+  } catch (cause) {
+    const m = cause instanceof Error ? cause.message : String(cause);
+    return err(new Error(`failed to write ${filePath}: ${m}`));
+  }
+}
+
 export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
   metadata: {
     id: 'tool-runner',
     version: '0.1.0',
     declared_dependencies: [],
+    produces: ['scan-facts.json'],
   },
 
   async run(
@@ -610,17 +651,21 @@ export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
       }
     }
 
-    const store = createFsArtifactStore(context.artifactDir);
-    // Per revision §3.1 + step 08b: the scan-facts artifact contains
-    // the consolidated ScanFact[] only — not the wrapper object. The
-    // per-scanner section status (stderr, error summary, etc.) is
-    // accessible via the agent's in-memory output for the
-    // orchestrator's reporting needs; the durable artifact carries
-    // only facts so downstream predicates have a clean contract.
-    const writeResult = await store.write(
+    // Per step 21 Bug 1: write `scan-facts.json` directly into
+    // `context.artifactDir` (which the CLI already constructs as
+    // `<projectRoot>/.veyra/scans/<scanId>/`). Using
+    // `createFsArtifactStore(context.artifactDir).write(context.scanId, ...)`
+    // doubled the scanId in the path AND wrapped the value in an
+    // Artifact<T> envelope that consumer predicates do not parse.
+    // The bare `{ scan_facts: [...] }` shape below matches what
+    // every consumer (authn / authz-tenant / supabase-rls /
+    // business-logic / ai-inference) already reads via
+    // `parsed.scan_facts`. Per revision §3.1 + step 08b the durable
+    // artifact carries facts only — no wrapper.
+    const writeResult = await writeScanFactsArtifact(
+      context.artifactDir,
       context.scanId,
-      'scan_facts',
-      { scan_facts: scanFacts },
+      scanFacts,
     );
 
     const artifacts: ArtifactRef[] = [];

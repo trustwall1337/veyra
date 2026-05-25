@@ -13,6 +13,7 @@ import {
   createScanOrchestrator,
   type ScanOrchestrator,
 } from '../core/orchestrator/scan-orchestrator.js';
+import { registerPhase1Agents } from './agent-registration.js';
 import type { AgentExecutionContext, AgentLogger } from '../types/agent.js';
 import type { ProviderId } from '../types/identity.js';
 import { type Result, err, ok } from '../types/result.js';
@@ -559,6 +560,11 @@ export async function runScan(
   };
 
   const orchestrator = deps.orchestratorFactory();
+  registerPhase1Agents(orchestrator, {
+    ...(inputs.supabaseSchemaPath !== undefined
+      ? { supabaseSchemaSqlPath: inputs.supabaseSchemaPath }
+      : {}),
+  });
   let exitCode = 0;
   try {
     const result = await orchestrator.run(context);
@@ -595,7 +601,71 @@ export async function runScan(
       const readinessReport = JSON.parse(text) as import('../types/readiness-report.js').ReadinessReport;
       const md = await import('../reporters/markdown/index.js');
       const jr = await import('../reporters/json/index.js');
-      await fs.writeFile(inputs.outPath, md.renderMarkdownReport(readinessReport), 'utf8');
+
+      // Step 21 Bug 2: load declared-context.json + inventory-bootstrap.json
+      // so the renderer's "Declared project context" + "Observed evidence"
+      // sections cite real content. Reads are best-effort — a missing
+      // or unparseable artifact falls back to the placeholder rendering.
+      type DeclaredContextShape = {
+        readonly observed_evidence?: import('../types/declared-context.js').ObservedEvidence;
+        readonly declared_intent?: import('../types/declared-context.js').DeclaredIntent;
+      };
+      type InventoryBootstrapShape = {
+        readonly observed_evidence?: import('../types/declared-context.js').ObservedEvidence;
+      };
+
+      // Step 21 retro f3: read both artifacts via `context.artifactDir`
+      // (the same value the orchestrator hands every agent), not by
+      // reconstructing the layout. A future change to artifactDir
+      // (e.g. configurable scan output root) lands here without
+      // silently regressing to placeholder rendering.
+      const declaredContextPath = path.join(
+        context.artifactDir,
+        'declared-context.json',
+      );
+      const inventoryPath = path.join(
+        context.artifactDir,
+        'inventory-bootstrap.json',
+      );
+      let declaredContext: { declared_intent?: import('../types/declared-context.js').DeclaredIntent } | undefined;
+      let observedEvidence: import('../types/declared-context.js').ObservedEvidence | undefined;
+      try {
+        const dcText = await fs.readFile(declaredContextPath, 'utf8');
+        const parsed = JSON.parse(dcText) as DeclaredContextShape;
+        if (parsed.declared_intent !== undefined) {
+          declaredContext = { declared_intent: parsed.declared_intent };
+        }
+        // declared-context.json carries observed_evidence too (the
+        // composer merges both halves); prefer this as the source for
+        // the report's "Observed evidence" section.
+        if (parsed.observed_evidence !== undefined) {
+          observedEvidence = parsed.observed_evidence;
+        }
+      } catch {
+        // Missing or unparseable declared-context.json — fall back
+        // below to inventory-bootstrap.json alone.
+      }
+      if (observedEvidence === undefined) {
+        try {
+          const invText = await fs.readFile(inventoryPath, 'utf8');
+          const parsed = JSON.parse(invText) as InventoryBootstrapShape;
+          if (parsed.observed_evidence !== undefined) {
+            observedEvidence = parsed.observed_evidence;
+          }
+        } catch {
+          // No inventory either — renderer keeps its placeholder text.
+        }
+      }
+
+      const reportOptions: import('../reporters/markdown/index.js').MarkdownReportOptions = {
+        ...(declaredContext !== undefined ? { declaredContext } : {}),
+        ...(observedEvidence !== undefined ? { observedEvidence } : {}),
+      };
+      await fs.writeFile(
+        inputs.outPath,
+        md.renderMarkdownReport(readinessReport, reportOptions),
+        'utf8',
+      );
       if (inputs.jsonPath !== undefined) {
         await fs.writeFile(inputs.jsonPath, jr.renderJsonReport(readinessReport), 'utf8');
       }

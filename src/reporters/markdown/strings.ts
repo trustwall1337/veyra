@@ -28,6 +28,9 @@ export const STRINGS = {
   CONTEXT_NO_CONTEXT_AVAILABLE:
     'No declared-context artifact was found for this scan.',
 
+  CONTEXT_DECLARED_INTENT_EMPTY:
+    'declared-context.json loaded; declared_intent is empty (no AI inference ran and no deterministic fallback hints were available).',
+
   EVIDENCE_NO_EVIDENCE_AVAILABLE:
     'No evidence-inventory artifact was found.',
 

@@ -58,7 +58,11 @@ import type {
 const METADATA: AgentMetadata = {
   id: 'product-understanding',
   version: '0.1.0',
-  declared_dependencies: ['inventory-bootstrap.json', 'ai-declared-intent.json'],
+  // The composer runs the deterministic Bootstrap Inventory itself
+  // (writes inventory-bootstrap.json) and may invoke the optional AI
+  // intent helper. It then writes the merged declared-context.json.
+  declared_dependencies: [],
+  produces: ['inventory-bootstrap.json', 'declared-context.json'],
 };
 
 export interface ProductUnderstandingInput {

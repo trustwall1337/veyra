@@ -185,14 +185,16 @@ describe('toolRunnerAgent', () => {
     // (dashes) per FPP §9.3 + revision §9 step-08-row.
     expect(result.artifacts[0]!.path.endsWith('scan-facts.json')).toBe(true);
     const onDisk = await fs.readFile(result.artifacts[0]!.path, 'utf8');
+    // Per step 21 Bug 1: the on-disk shape is the bare
+    // `{ scan_facts: [...] }` (no Artifact<T> wrapper), matching what
+    // every downstream consumer (authn, authz-tenant, supabase-rls,
+    // business-logic, ai-inference) reads via `parsed.scan_facts`.
     const parsed = JSON.parse(onDisk) as {
-      value: {
-        scan_facts: { fact_id: string; source: { kind: string } }[];
-      };
+      scan_facts: { fact_id: string; source: { kind: string } }[];
     };
-    expect(parsed.value.scan_facts.length).toBeGreaterThan(0);
+    expect(parsed.scan_facts.length).toBeGreaterThan(0);
     // Each ScanFact carries `source.kind = 'scanner_match'`.
-    for (const f of parsed.value.scan_facts) {
+    for (const f of parsed.scan_facts) {
       expect(f.source.kind).toBe('scanner_match');
     }
     // The agent-level output still exposes scannerSections in memory.
@@ -299,5 +301,69 @@ describe('toolRunnerAgent', () => {
 
     const onDisk = await fs.readFile(result.artifacts[0]!.path, 'utf8');
     expect(onDisk).not.toContain(FAKE_AWS_KEY);
+  });
+});
+
+describe('writeScanFactsArtifact — step 21 Bug 1 regression', () => {
+  it('writes scan-facts.json to <artifactDir>/scan-facts.json exactly — no nested scanId segment', async () => {
+    const context = await buildContext({ scanId: 'scan-21-bug1' });
+    const result = await toolRunnerAgent.run(
+      {
+        runners: {
+          gitleaks: (async () => ({
+            stdout: '[]',
+            stderr: '',
+            exitCode: 0,
+          })) as GitleaksRunner,
+          osv: (async () => ({
+            stdout: JSON.stringify({ results: [] }),
+            stderr: '',
+            exitCode: 0,
+          })) as OsvRunner,
+          semgrep: (async () => ({
+            stdout: JSON.stringify({ results: [] }),
+            stderr: '',
+            exitCode: 0,
+          })) as SemgrepRunner,
+        },
+        lockfilePath: '/tmp/no-lockfile.json',
+        rulesPath: '/tmp/no-rules',
+      },
+      context,
+    );
+    expect(result.status).toBe('completed');
+    expect(result.artifacts.length).toBeGreaterThanOrEqual(1);
+
+    // Bug 1: the on-disk path must be exactly <artifactDir>/scan-facts.json.
+    const expectedPath = path.join(context.artifactDir, 'scan-facts.json');
+    const scanFactsRef = result.artifacts.find(
+      (a) => a.kind === 'scan_facts',
+    );
+    expect(scanFactsRef?.path).toBe(expectedPath);
+
+    // The nested-scanId variant (pre-fix) must NOT exist.
+    const buggyPath = path.join(
+      context.artifactDir,
+      context.scanId,
+      'scan-facts.json',
+    );
+    let buggyExists = true;
+    try {
+      await fs.stat(buggyPath);
+    } catch {
+      buggyExists = false;
+    }
+    expect(buggyExists).toBe(false);
+
+    // Bug 1 shape: the file content must be the bare
+    // `{ scan_facts: [...] }` form consumers parse, NOT the
+    // `{ ref, value, written_at }` Artifact<T> wrapper.
+    const text = await fs.readFile(expectedPath, 'utf8');
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    expect(parsed).toHaveProperty('scan_facts');
+    expect(Array.isArray(parsed.scan_facts)).toBe(true);
+    expect(parsed).not.toHaveProperty('ref');
+    expect(parsed).not.toHaveProperty('value');
+    expect(parsed).not.toHaveProperty('written_at');
   });
 });

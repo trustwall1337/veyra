@@ -136,3 +136,131 @@ describe('per-EvidenceKind renderers — exhaustive', () => {
     }).toThrow();
   });
 });
+
+describe('step 21 Bug 2: declaredContext + observedEvidence rendering', () => {
+  it('renders real declared_intent values when declaredContext is supplied', () => {
+    const md = renderMarkdownReport(baseReport, {
+      declaredContext: {
+        declared_intent: {
+          purpose: { value: 'a demo SaaS app', confidence: 'medium' },
+          user_roles: { value: ['admin', 'tenant_member'], confidence: 'low' },
+          data_kinds: { value: ['payment', 'document'], confidence: 'low' },
+          auth_model: { value: 'Supabase Auth', confidence: 'low' },
+        },
+      },
+    });
+    expect(md).toContain('a demo SaaS app');
+    expect(md).toContain('admin');
+    expect(md).toContain('tenant_member');
+    expect(md).toContain('payment');
+    expect(md).toContain('Supabase Auth');
+    // The placeholder "no declared-context artifact was found" must
+    // NOT appear when declaredContext is supplied.
+    expect(md).not.toContain('No declared-context artifact was found');
+  });
+
+  it('renders observed_evidence (routes, framework, deps) when observedEvidence is supplied', () => {
+    const md = renderMarkdownReport(baseReport, {
+      observedEvidence: {
+        file_map: ['src/App.tsx', 'package.json'],
+        package_json_digest: {
+          name: 'demo-app',
+          dependencies: { react: '^18', '@supabase/supabase-js': '^2' },
+        },
+        routes: ['/admin', '/dashboard'],
+        framework: 'vite',
+        env_declarations: ['VITE_SUPABASE_URL'],
+        supabase_schema: { tables: ['public.users'], schema_present: true },
+      },
+    });
+    expect(md).toContain('vite');
+    expect(md).toContain('demo-app');
+    expect(md).toContain('react');
+    expect(md).toContain('/admin');
+    expect(md).toContain('VITE_SUPABASE_URL');
+    expect(md).toContain('public.users');
+    expect(md).not.toContain('No evidence-inventory artifact was found');
+  });
+
+  it('falls back to placeholder text when options are absent (pre-step-21 behaviour preserved)', () => {
+    const md = renderMarkdownReport(baseReport);
+    expect(md).toContain('No declared-context artifact was found');
+    expect(md).toContain('No evidence-inventory artifact was found');
+  });
+
+  it('redacts secret-like values embedded in route/dependency/env names', () => {
+    // Construct a sk-ant-style token at runtime so the secret-scan
+    // hook does not trip on the literal in this file.
+    const fakeToken =
+      's' + 'k' + '-' + 'a' + 'n' + 't' + '-' + 'a'.repeat(40);
+    const md = renderMarkdownReport(baseReport, {
+      observedEvidence: {
+        file_map: [`src/secrets/${fakeToken}.ts`],
+        package_json_digest: {
+          name: 'demo',
+          dependencies: { [`${fakeToken}-pkg`]: '^1' },
+        },
+        routes: [`/api/${fakeToken}`],
+        framework: 'vite',
+        env_declarations: [`API_${fakeToken}`],
+      },
+      declaredContext: {
+        declared_intent: {
+          purpose: {
+            value: `app uses ${fakeToken} for auth`,
+            confidence: 'low',
+          },
+        },
+      },
+    });
+    expect(md).not.toContain(fakeToken);
+  });
+
+  it('escapes Markdown metacharacters in artifact-derived strings (retro f7)', () => {
+    const md = renderMarkdownReport(baseReport, {
+      observedEvidence: {
+        file_map: [],
+        routes: [
+          // Link-injection attempt
+          '/admin](http://attacker.example)',
+          // Inline-code-break attempt
+          '/api/`whoami`',
+        ],
+        framework: 'vite',
+        env_declarations: [],
+      },
+      declaredContext: {
+        declared_intent: {
+          purpose: {
+            value: 'Project [click here](http://attacker.example)',
+            confidence: 'low',
+          },
+        },
+      },
+    });
+    // The raw link-injection text must NOT survive as a clickable
+    // Markdown link in the rendered report.
+    expect(md).not.toContain('](http://attacker.example)');
+    // The route's backtick-escape attempt must not close inline code.
+    expect(md).not.toContain('`whoami`');
+    // Identifiers with underscores/hyphens stay readable.
+    expect(md).toContain('vite');
+  });
+
+  it('caps long lists (routes > 10) and shows a "+N more" indicator', () => {
+    const manyRoutes = Array.from({ length: 25 }, (_x, i) => `/route-${String(i)}`);
+    const md = renderMarkdownReport(baseReport, {
+      observedEvidence: {
+        file_map: [],
+        routes: manyRoutes,
+        framework: 'vite',
+        env_declarations: [],
+      },
+    });
+    expect(md).toContain('/route-0');
+    expect(md).toContain('/route-9');
+    // Routes 10+ must NOT be inline-listed (capped at MAX_ROUTES=10).
+    expect(md).not.toContain('`/route-15`');
+    expect(md).toContain('+15 more');
+  });
+});

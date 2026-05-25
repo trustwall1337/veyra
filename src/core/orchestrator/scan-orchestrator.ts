@@ -104,11 +104,57 @@ interface Registered {
  */
 function topoLayers(entries: readonly Registered[]): Registered[][] {
   const idSet = new Set(entries.map((e) => e.agent.metadata.id));
+  // Step 21 Bug 4: resolve artifact-name dependencies to producing
+  // agents. Each registered agent's `metadata.produces` lists the
+  // artifact basenames it writes to its artifactDir; building a
+  // reverse map here lets `declared_dependencies: ['scan-facts.json']`
+  // actually sequence after the tool-runner agent that writes it.
+  // Without this, every dep was filtered out (none matched an agent
+  // id), every agent landed in layer 0, and aggregation agents like
+  // evidence-report ran with an empty upstream map.
+  // Step 21 retro f5: a single producer per artifact is the contract;
+  // two agents claiming the same artifact basename is a registration
+  // bug, surfaced as a CycleError-shaped throw so the scan fails
+  // closed at registration time rather than silently picking one.
+  const artifactProducer = new Map<string, string>();
+  for (const e of entries) {
+    for (const art of e.agent.metadata.produces ?? []) {
+      const existing = artifactProducer.get(art);
+      if (existing !== undefined && existing !== e.agent.metadata.id) {
+        throw new CycleError(
+          `agent "${e.agent.metadata.id}" and agent "${existing}" both claim to produce artifact "${art}"; declare a single producer or rename the artifact`,
+        );
+      }
+      artifactProducer.set(art, e.agent.metadata.id);
+    }
+  }
   const incoming = new Map<string, Set<string>>();
   for (const e of entries) {
     const deps = new Set<string>();
     for (const d of e.agent.metadata.declared_dependencies) {
-      if (idSet.has(d)) deps.add(d);
+      if (d === '*') {
+        // Aggregation marker: depend on every other registered agent.
+        // Step 21 retro f6: `'*'` is single-aggregator only. Two
+        // agents both declaring `'*'` produce a mutual dependency
+        // and the existing cycle-detection below throws a
+        // CycleError, surfacing the misconfiguration fail-closed.
+        for (const otherId of idSet) {
+          if (otherId !== e.agent.metadata.id) deps.add(otherId);
+        }
+        continue;
+      }
+      if (idSet.has(d)) {
+        deps.add(d);
+        continue;
+      }
+      const producer = artifactProducer.get(d);
+      if (producer !== undefined && producer !== e.agent.metadata.id) {
+        deps.add(producer);
+      }
+      // Unknown dep (neither agent id nor produced artifact): silently
+      // ignored — keeps the loose contract for soft dependencies on
+      // artifacts that may be produced by out-of-graph sources (e.g.
+      // a CLI-planted scanner-findings.json from older runs).
     }
     incoming.set(e.agent.metadata.id, deps);
   }

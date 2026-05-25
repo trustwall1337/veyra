@@ -5,7 +5,24 @@ import type { ValidationPolicy } from './validation-policy.js';
 export interface AgentMetadata {
   readonly id: string;
   readonly version: string;
+  /**
+   * What this agent needs to be present before it runs. Entries can
+   * be either:
+   *  - an agent id (resolves directly to that agent), or
+   *  - an artifact basename (resolves to whichever registered agent
+   *    declares the artifact in `produces`).
+   *
+   * The special value `'*'` means "depend on every other registered
+   * agent" — used by report/aggregation agents that consume all
+   * upstream findings.
+   */
   readonly declared_dependencies: readonly string[];
+  /**
+   * Artifact basenames this agent writes to its execution context's
+   * `artifactDir`. Used by the orchestrator's topological sort to
+   * resolve artifact-name dependencies declared by other agents.
+   */
+  readonly produces?: readonly string[];
 }
 
 export interface AgentLogger {

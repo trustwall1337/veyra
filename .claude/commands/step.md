@@ -1,15 +1,33 @@
 ---
-description: Run a Phase 1 step end-to-end — reads the step file, plans the work in plain English, asks approval, implements, verifies, stops before commit.
-argument-hint: <step-number, e.g. 1 or 01>
+description: Run a Veyra step (Phase 1 or Phase 2) end-to-end — reads the step file, plans the work in plain English, asks approval, implements, verifies, stops before commit.
+argument-hint: <step-number> (e.g. `1` or `01` for Phase 1, `2.01` for Phase 2)
 ---
 
-Run Phase 1 step `$ARGUMENTS`.
+Run Veyra step `$ARGUMENTS`.
 
 The user has asked you to do work that's pre-specified in a step file. Your job is to: understand what the step asks, **explain it back to the user in plain English** so they can spot misunderstandings before any code is written, get approval, implement, verify, and stop. Communication discipline is the deliverable.
 
 ## 1. Find the step file
 
-Pad `$ARGUMENTS` to two digits and find the matching file in `phases/phase-1/steps/NN-*.md`. If no file matches, stop and tell the user — do not guess a step number.
+Parse `$ARGUMENTS` as `<phase>.<step>` (e.g. `2.01`, `2.07b`). If no dot is present, default phase to `1` (so legacy invocations like `/step 03b` still resolve to Phase 1).
+
+- `<phase>` must be `1` or `2`. Any other value → stop and tell the user.
+- `<step>` is the step identifier as it appears in the filename prefix: numeric (`01`, `02`), with an optional letter suffix (`02b`, `08c`, `10a`, `10e`). Zero-pad numeric values to two digits.
+
+Look up the matching file:
+
+```
+phases/phase-<phase>/steps/<step>-*.md
+```
+
+Examples:
+- `/step 01` → `phases/phase-1/steps/01-*.md` (Phase 1 default)
+- `/step 02b` → `phases/phase-1/steps/02b-*.md`
+- `/step 2.01` → `phases/phase-2/steps/01-*.md`
+- `/step 2.07b` → `phases/phase-2/steps/07b-*.md`
+- `/step 2.10a` → `phases/phase-2/steps/10a-*.md`
+
+If no file matches, stop and tell the user — do not guess. If multiple match (shouldn't happen given the naming convention), stop and ask the user to disambiguate.
 
 ## 2. Read the contract
 

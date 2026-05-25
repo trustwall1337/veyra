@@ -53,6 +53,7 @@ const METADATA: AgentMetadata = {
   id: 'supabase-rls',
   version: '0.1.0',
   declared_dependencies: ['supabase-schema-sql', 'storage-buckets-json'],
+  produces: ['supabase-tables.json'],
 };
 
 const UNCERTAINTY_NOTE =
