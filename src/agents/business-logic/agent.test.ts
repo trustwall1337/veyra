@@ -34,7 +34,7 @@ describe('CHECKLIST — invariants', () => {
   it('every item has a stable id and at least one suggested_test', () => {
     const ids = new Set<string>();
     for (const item of CHECKLIST) {
-      expect(item.id).toMatch(/^bl-/);
+      expect(item.id).toMatch(/^business-/);
       expect(ids.has(item.id)).toBe(false);
       ids.add(item.id);
       expect(item.suggested_tests.length).toBeGreaterThan(0);
@@ -50,8 +50,8 @@ describe('evaluateChecklist — declared-context predicates', () => {
       },
     });
     const ids = r.applicable.map((i) => i.id);
-    expect(ids).toContain('bl-self-approval');
-    expect(ids).toContain('bl-refund-reversal');
+    expect(ids).toContain('business-self-approval');
+    expect(ids).toContain('business-refund-flow-authz');
   });
 
   it('applies the tenant-transition checklist when project declares tenant roles', () => {
@@ -61,8 +61,8 @@ describe('evaluateChecklist — declared-context predicates', () => {
       },
     });
     const ids = r.applicable.map((i) => i.id);
-    expect(ids).toContain('bl-cross-tenant-invite');
-    expect(ids).toContain('bl-tenant-membership-transitions');
+    expect(ids).toContain('business-cross-tenant-invite');
+    expect(ids).toContain('business-tenant-membership-transitions');
   });
 
   it('emits nothing when the declared context shows none of the categories', () => {

@@ -48,7 +48,7 @@ function depsInclude(ctx: ChecklistContext, dep: string): boolean {
 
 export const CHECKLIST: readonly ChecklistItem[] = [
   {
-    id: 'bl-self-approval',
+    id: 'business-self-approval',
     control_id: 'cc-11-11',
     title:
       'Self-approval of money / role / ownership changes',
@@ -67,7 +67,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       'Money / role / ownership transitions need a non-self approver to prevent privilege escalation and self-dealing.',
   },
   {
-    id: 'bl-cross-tenant-invite',
+    id: 'business-cross-tenant-invite',
     control_id: 'cc-11-11',
     title: 'Cross-tenant invitations or attachments',
     applies: (ctx) =>
@@ -82,7 +82,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       'Tenant boundaries must be enforced server-side on invite and attachment flows; a frontend selector is not sufficient.',
   },
   {
-    id: 'bl-admin-server-side',
+    id: 'business-admin-server-side',
     control_id: 'cc-11-11',
     title: 'Server-side admin enforcement (not frontend-only)',
     applies: (ctx) =>
@@ -95,7 +95,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       'A client-side route guard does not prevent direct API calls; admin endpoints must check role on the server.',
   },
   {
-    id: 'bl-file-access',
+    id: 'business-file-access',
     control_id: 'cc-11-11',
     title: 'File / attachment access scoped to owner or tenant',
     applies: (ctx) =>
@@ -113,7 +113,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       'File and attachment endpoints frequently leak across tenant boundaries when access is scoped only by primary key.',
   },
   {
-    id: 'bl-tenant-membership-transitions',
+    id: 'business-tenant-membership-transitions',
     control_id: 'cc-11-11',
     title: 'Tenant-membership transitions (leave, invite, demote)',
     applies: (ctx) =>
@@ -128,7 +128,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       'Tenant-membership transitions are sensitive operations; demote/remove flows are common authorization gaps.',
   },
   {
-    id: 'bl-refund-reversal',
+    id: 'business-refund-flow-authz',
     control_id: 'cc-11-11',
     title: 'Refund / reversal / cancel flows authorization',
     applies: (ctx) =>

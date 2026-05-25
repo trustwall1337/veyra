@@ -46,8 +46,8 @@ describe('predicatesBusinessLogic — fact-driven', () => {
       },
     );
     const ids = findings.map((f) => f.id);
-    expect(ids).toContain('bl-self-approval-coverage-gap');
-    expect(ids).toContain('bl-refund-reversal-coverage-gap');
+    expect(ids).toContain('business-self-approval-coverage-gap');
+    expect(ids).toContain('business-refund-flow-authz-coverage-gap');
   });
 
   it('NEVER emits confirmed_issue (constraint 10 enforcement)', () => {
@@ -104,6 +104,47 @@ describe('individual predicates — pure on ScanFact[] + declared context', () =
       },
     });
     expect(f.length).toBe(1);
+  });
+});
+
+describe('retro-12b f2: evidence_refs carry triggering fact_ids', () => {
+  it('coverage_gap findings cite the schema_element fact_ids they fired on', () => {
+    const facts = [tableFact('payments'), tableFact('orders')];
+    const findings = predicatesBusinessLogic(facts, {
+      declared_intent: {
+        data_kinds: { value: ['payments'], confidence: 'medium' },
+      },
+    });
+    const refs = new Set(findings.flatMap((f) => f.evidence_refs));
+    expect(refs.has('tf-payments')).toBe(true);
+    expect(refs.has('tf-orders')).toBe(true);
+  });
+});
+
+describe('retro-12b f5: source.name is the structured API (not sanitized_excerpt)', () => {
+  it('detects tables from source.name even when payload is absent', () => {
+    const pid = asParserId('supabase-schema');
+    if (!pid.ok) throw pid.error;
+    const factSansExcerpt: ScanFact = {
+      fact_id: 'tf-no-excerpt',
+      source: {
+        kind: 'schema_element',
+        parser_id: pid.value,
+        element_kind: 'table',
+        name: 'public.payments',
+      },
+      observed_at: '2026-05-25T00:00:00Z',
+      args_fingerprint_sha256: 'x',
+      redacted: false,
+    };
+    const findings = predicatesBusinessLogic([factSansExcerpt], {
+      declared_intent: {
+        data_kinds: { value: ['payments'], confidence: 'medium' },
+      },
+    });
+    const ids = findings.map((f) => f.id);
+    expect(ids).toContain('business-self-approval-coverage-gap');
+    expect(ids).toContain('business-refund-flow-authz-coverage-gap');
   });
 });
 

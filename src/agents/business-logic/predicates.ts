@@ -8,6 +8,14 @@
  *
  * Predicates accept readonly ScanFact[] only; type-level absence of
  * Hypothesis input enforces constraint 10.
+ *
+ * Note on retro-12b f1 (declared_intent + Pass-1 facts-only rule):
+ * declared_intent CAN be AI-derived (after 17c). Predicates that fire
+ * on declared_intent intentionally emit `coverage_gap` (evidence_strength:
+ * low, review_action: add_test) — never `confirmed_issue`. This
+ * satisfies constraint 10's classification-authority intent: AI never
+ * sets the launch-block classification; it can only nudge a reviewer
+ * (or Phase 2 active validation) toward a negative test.
  */
 
 import type {
@@ -22,7 +30,10 @@ import { CHECKLIST, type ChecklistContext, type ChecklistItem } from './checklis
 const UNCERTAINTY_NOTE =
   'deterministic checklist over declared context; lack of declared signal does not imply absence — these are negative-test suggestions';
 
-function buildFinding(item: ChecklistItem): Finding {
+function buildFinding(
+  item: ChecklistItem,
+  evidenceRefs: readonly string[],
+): Finding {
   return {
     id: `${item.id}-coverage-gap`,
     control_id: item.control_id,
@@ -33,34 +44,50 @@ function buildFinding(item: ChecklistItem): Finding {
     blast_radius: 'tenant_data',
     title: `Business-logic check: ${item.title}`,
     summary: `${item.rationale} Negative tests should be added. ${UNCERTAINTY_NOTE}.`,
-    evidence_refs: [],
+    evidence_refs: evidenceRefs,
     suggested_test_ids: item.suggested_tests,
   };
 }
 
+interface ProjectedContext {
+  readonly ctx: ChecklistContext;
+  readonly tableFactIds: ReadonlyMap<string, string>;
+}
+
 /**
  * Project ScanFact[] + declared context into the shape the original
- * checklist consumes. Scan-facts that carry declared-context-style
- * payloads can extend `observed_evidence` here in the future.
+ * checklist consumes. Per retro-12b f5: table names come from the
+ * structured `source.name` field of schema_element facts, not from
+ * parsing `sanitized_excerpt` JSON (which is presentation text and
+ * subject to redaction).
  */
 function projectContext(
   facts: readonly ScanFact[],
   declared?: ChecklistContext,
-): ChecklistContext {
+): ProjectedContext {
   const declaredObserved = declared?.observed_evidence;
   const tables = new Set<string>(
     declaredObserved?.supabase_schema?.tables ?? [],
   );
+  // Track which schema_element fact carries each table so coverage_gap
+  // findings can cite the fact_id (retro-12b f2).
+  const tableFactIds = new Map<string, string>();
   for (const f of facts) {
     if (f.source.kind !== 'schema_element') continue;
     if (f.source.element_kind !== 'table') continue;
-    try {
-      const payload = JSON.parse(
-        f.source.payload?.sanitized_excerpt ?? '{}',
-      ) as { name?: string };
-      if (typeof payload.name === 'string') tables.add(payload.name);
-    } catch {
-      // ignore
+    // The structured `source.name` field is the API; payload is
+    // presentation text. e.g. "public.payments" or just "payments".
+    const sourceName = f.source.name;
+    if (typeof sourceName !== 'string' || sourceName.length === 0) continue;
+    // Strip a "schema." prefix if present so the bare table name
+    // also matches checklist regexes that look for the leaf name.
+    const dotIdx = sourceName.indexOf('.');
+    const bareName = dotIdx >= 0 ? sourceName.slice(dotIdx + 1) : sourceName;
+    tables.add(sourceName);
+    tableFactIds.set(sourceName, f.fact_id);
+    if (bareName !== sourceName) {
+      tables.add(bareName);
+      tableFactIds.set(bareName, f.fact_id);
     }
   }
   const observed: Partial<ObservedEvidence> = {
@@ -76,10 +103,13 @@ function projectContext(
       : {}),
   };
   return {
-    observed_evidence: observed,
-    ...(declared?.declared_intent !== undefined
-      ? { declared_intent: declared.declared_intent }
-      : {}),
+    ctx: {
+      observed_evidence: observed,
+      ...(declared?.declared_intent !== undefined
+        ? { declared_intent: declared.declared_intent }
+        : {}),
+    },
+    tableFactIds,
   };
 }
 
@@ -95,41 +125,49 @@ export function predicatesBusinessLogic(
     readonly declared_intent?: DeclaredIntent;
   },
 ): readonly Finding[] {
-  const ctx = projectContext(facts, declared);
-  return CHECKLIST.filter((item) => item.applies(ctx)).map(buildFinding);
+  const { ctx, tableFactIds } = projectContext(facts, declared);
+  const refs = Array.from(tableFactIds.values());
+  return CHECKLIST.filter((item) => item.applies(ctx)).map((item) =>
+    buildFinding(item, refs),
+  );
 }
 
 // Individually exported predicates so the orchestrator can route by
 // id rather than as a bundle. Each addresses the same checklist item
 // directly; consumers that only care about one predicate can use the
-// narrow form.
+// narrow form. Adding a new addressable predicate = appending a
+// ChecklistItem entry in CHECKLIST (the registry), no edit required
+// here unless the orchestrator wants a typed accessor.
+
+function predicateForId(
+  id: string,
+  facts: readonly ScanFact[],
+  declared?: ChecklistContext,
+): readonly Finding[] {
+  const item = CHECKLIST.find((c) => c.id === id);
+  if (item === undefined) return [];
+  const { ctx, tableFactIds } = projectContext(facts, declared);
+  if (!item.applies(ctx)) return [];
+  return [buildFinding(item, Array.from(tableFactIds.values()))];
+}
 
 export function predicateSelfApproval(
   facts: readonly ScanFact[],
   declared?: ChecklistContext,
 ): readonly Finding[] {
-  const item = CHECKLIST.find((c) => c.id === 'bl-self-approval');
-  if (item === undefined) return [];
-  const ctx = projectContext(facts, declared);
-  return item.applies(ctx) ? [buildFinding(item)] : [];
+  return predicateForId('business-self-approval', facts, declared);
 }
 
 export function predicateCrossTenantInvite(
   facts: readonly ScanFact[],
   declared?: ChecklistContext,
 ): readonly Finding[] {
-  const item = CHECKLIST.find((c) => c.id === 'bl-cross-tenant-invite');
-  if (item === undefined) return [];
-  const ctx = projectContext(facts, declared);
-  return item.applies(ctx) ? [buildFinding(item)] : [];
+  return predicateForId('business-cross-tenant-invite', facts, declared);
 }
 
 export function predicateRefundFlow(
   facts: readonly ScanFact[],
   declared?: ChecklistContext,
 ): readonly Finding[] {
-  const item = CHECKLIST.find((c) => c.id === 'bl-refund-reversal');
-  if (item === undefined) return [];
-  const ctx = projectContext(facts, declared);
-  return item.applies(ctx) ? [buildFinding(item)] : [];
+  return predicateForId('business-refund-flow-authz', facts, declared);
 }
