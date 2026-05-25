@@ -1,6 +1,6 @@
 # Step 12 — Business-logic agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 12`, §4.5
 **Produces:** `src/agents/business-logic/`
 **Depends on:** 02, 17
