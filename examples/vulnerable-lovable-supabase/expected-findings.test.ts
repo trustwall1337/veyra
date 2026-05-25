@@ -137,3 +137,69 @@ describe('vulnerable-lovable-supabase: expected-findings.json', () => {
     }
   });
 });
+
+interface ExpectedAiConcern {
+  readonly category: 'no_predicate_fired' | 'insufficient_facts';
+  readonly confidence: 'low' | 'medium' | 'high';
+  readonly must_surface: boolean;
+  readonly description: string;
+  readonly fixture_anchor: string;
+  readonly control_id?: string;
+}
+
+interface ExpectedAiConcernsArtifact {
+  readonly must_surface: readonly ExpectedAiConcern[];
+  readonly tolerated_low_confidence: readonly { readonly category: string; readonly rationale: string }[];
+}
+
+async function loadAiConcerns(): Promise<ExpectedAiConcernsArtifact> {
+  const raw = await fs.readFile(
+    path.join(FIXTURE_DIR, 'expected-ai-concerns.json'),
+    'utf8',
+  );
+  return JSON.parse(raw) as ExpectedAiConcernsArtifact;
+}
+
+describe('vulnerable-lovable-supabase: expected-ai-concerns.json (04b)', () => {
+  it('parses with the documented sections', async () => {
+    const parsed = await loadAiConcerns();
+    expect(Array.isArray(parsed.must_surface)).toBe(true);
+    expect(Array.isArray(parsed.tolerated_low_confidence)).toBe(true);
+  });
+
+  it('every must_surface entry has a valid category, confidence, anchor', async () => {
+    const parsed = await loadAiConcerns();
+    for (const entry of parsed.must_surface) {
+      expect(['no_predicate_fired', 'insufficient_facts']).toContain(
+        entry.category,
+      );
+      expect(['low', 'medium', 'high']).toContain(entry.confidence);
+      expect(entry.must_surface).toBe(true);
+      expect(typeof entry.description).toBe('string');
+      expect(entry.description.length).toBeGreaterThan(0);
+      expect(typeof entry.fixture_anchor).toBe('string');
+    }
+  });
+
+  it('control_id (when set) follows the cc-11-N convention', async () => {
+    const parsed = await loadAiConcerns();
+    for (const entry of parsed.must_surface) {
+      if (entry.control_id !== undefined) {
+        expect(entry.control_id).toMatch(CONTROL_ID_PATTERN);
+      }
+    }
+  });
+});
+
+describe('cross-reference: control_ids span both manifests in lockstep', () => {
+  it('every control_id in expected-ai-concerns appears in expected-findings.must_surface', async () => {
+    const findings = await loadManifest();
+    const concerns = await loadAiConcerns();
+    const allFindingIds = new Set(findings.must_surface.map((e) => e.control_id));
+    for (const c of concerns.must_surface) {
+      if (c.control_id !== undefined) {
+        expect(allFindingIds.has(c.control_id), `control ${c.control_id} not in expected-findings`).toBe(true);
+      }
+    }
+  });
+});

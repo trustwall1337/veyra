@@ -1,0 +1,28 @@
+{
+  "$schema_note": "Veyra Phase 1 fixture expectations for AIConcern entries (revision §3.4 + §11). Sibling of expected-findings.json. Read only when AI is opted in. Each entry: { control_id?, category, confidence, must_surface }. confidence='low' entries are tolerated but not required (per revision §14 Q6 + Q8).",
+  "fixture_path": "examples/vulnerable-lovable-supabase",
+  "must_surface": [
+    {
+      "category": "no_predicate_fired",
+      "confidence": "medium",
+      "must_surface": true,
+      "description": "AI may notice that documents.tenant_id is read straight from URL params (cc-11-4 style) but be unable to point at a per-row policy that would catch it; surfaces as an AI concern when no deterministic predicate fires that maps exactly.",
+      "fixture_anchor": "src/pages/DashboardPage.tsx",
+      "control_id": "cc-11-4"
+    },
+    {
+      "category": "insufficient_facts",
+      "confidence": "medium",
+      "must_surface": true,
+      "description": "AI may flag the missing server-side admin role check on /admin even when Semgrep does not have a rule for the exact pattern; surfaces as an AI concern because the deterministic predicate cc-11-2 needs corroborating facts that may not all be present.",
+      "fixture_anchor": "src/App.tsx",
+      "control_id": "cc-11-2"
+    }
+  ],
+  "tolerated_low_confidence": [
+    {
+      "category": "no_predicate_fired",
+      "rationale": "Low-confidence AI concerns are not required by the gate (revision §14 Q6 default threshold is medium). They are tolerated when present and ignored when absent."
+    }
+  ]
+}

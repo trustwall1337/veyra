@@ -1,6 +1,6 @@
 # Step 04b — Fixture amendment: `expected-findings.json` + `expected-ai-concerns.json`
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §9 step 04 row`
 **Amends Phase 1 step:** 04
 **Produces:** amended fixture at `examples/vulnerable-lovable-supabase/`
