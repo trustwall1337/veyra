@@ -1,6 +1,6 @@
 # Step 08d — AI Inference Agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §3.2, §7.2, §12 ordering, §12b opt-in, §14 Q4 (hypothesis budget)`
 **Amends Phase 1 step:** none — new step file
 **Produces:** agent at `src/agents/ai-inference/`
