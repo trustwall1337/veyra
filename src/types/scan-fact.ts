@@ -48,6 +48,15 @@ export interface ScanFactPayload {
   readonly content_kind: ScanFactContentKind;
   readonly byte_range?: { readonly start: number; readonly end: number };
   readonly source_artifact_path?: string;
+  /**
+   * Optional generic identifier for a rule that produced this fact.
+   * For semgrep this is `check_id` (e.g. `rules.authz.direct-object-access-by-id`);
+   * downstream assertion predicates dispatch on the rule id, not on
+   * the scanner id (a fact identified by rule `cc-11-3` is consumed by
+   * the cc-11-3 predicate regardless of which scanner produced it).
+   * The name is generic so any scanner with a rule concept can use it.
+   */
+  readonly rule_id?: string;
 }
 
 export interface ScannerMatchSource {

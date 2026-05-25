@@ -1,14 +1,23 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
+import { redactSecrets as sanitizeForStorage } from '../../ai/sanitization.js';
+import { registry } from '../../core/registry/service-registry.js';
 import {
   ScannerExecutionError,
   ScannerNotInstalledError,
 } from '../../types/errors.js';
+import { asScannerId, type ScannerId } from '../../types/identity.js';
 import { type Result, err, ok } from '../../types/result.js';
+import type {
+  ScanFact,
+  ScanFactPayload,
+} from '../../types/scan-fact.js';
 
 import { parseSemgrepJson } from './parser.js';
 import type {
   SemgrepError,
+  SemgrepFinding,
   SemgrepInput,
   SemgrepOutput,
   SemgrepRunner,
@@ -20,6 +29,28 @@ const BINARY = 'semgrep';
 const DEFAULT_TIMEOUT_MS = 120_000;
 const INSTALL_HINT =
   'macOS: `brew install semgrep`. pipx: `pipx install semgrep`. Docs: https://semgrep.dev/docs/getting-started/cli';
+
+function mintScannerId(): ScannerId {
+  const r = asScannerId('semgrep');
+  if (!r.ok) {
+    throw new Error(
+      `semgrep adapter: invalid hardcoded scanner id: ${r.error.message}`,
+    );
+  }
+  return r.value;
+}
+
+export const SEMGREP_SCANNER_ID: ScannerId = mintScannerId();
+
+const _registration = registry.registerScanner({
+  id: SEMGREP_SCANNER_ID,
+  displayName: 'Semgrep',
+});
+if (!_registration.ok) {
+  throw new Error(
+    `semgrep adapter: failed to register with ServiceRegistry: ${_registration.error.message}`,
+  );
+}
 
 const DEFAULT_RUNNER: SemgrepRunner = (binary, args, opts) =>
   new Promise<SemgrepRunnerResult>((resolve, reject) => {
@@ -126,5 +157,61 @@ export async function runSemgrep(
 
   const parsed = parseSemgrepJson(raw.stdout);
   if (!parsed.ok) return err(parsed.error);
-  return ok(parsed.value);
+
+  const argsFingerprint = sha256(JSON.stringify({ binary: BINARY, args }));
+  const observedAt = new Date().toISOString();
+  const facts = parsed.value.findings.map((f) =>
+    buildScanFact(f, argsFingerprint, observedAt),
+  );
+
+  return ok({ ...parsed.value, facts });
+}
+
+/**
+ * Wrap one normalized semgrep finding into a generic `ScanFact`. The
+ * matched source lines (`finding.lines`, from semgrep's `extra.lines`)
+ * pass through 02c `redactSecrets`; `redacted` reflects whether the
+ * sanitizer actually changed the content. `byte_range` is populated
+ * from semgrep's `start.offset` / `end.offset` (byte offsets, not line
+ * numbers); top-level `line` keeps the start line.
+ */
+function buildScanFact(
+  finding: SemgrepFinding,
+  argsFingerprint: string,
+  observedAt: string,
+): ScanFact {
+  const rawExcerpt =
+    finding.lines !== undefined && finding.lines.length > 0
+      ? finding.lines
+      : `${finding.ruleId}: ${finding.message}`;
+  const sanitized: string = sanitizeForStorage(rawExcerpt);
+  const wasRedacted = sanitized !== rawExcerpt;
+  const payload: ScanFactPayload = {
+    sanitized_excerpt: sanitized,
+    content_kind: 'text',
+    rule_id: finding.ruleId,
+    ...(finding.startOffset !== undefined && finding.endOffset !== undefined
+      ? { byte_range: { start: finding.startOffset, end: finding.endOffset } }
+      : {}),
+  };
+  const factId = sha256(
+    `${SEMGREP_SCANNER_ID as string}:${finding.filePath}:${String(finding.startLine)}:${finding.ruleId}`,
+  );
+  return {
+    fact_id: factId,
+    source: {
+      kind: 'scanner_match',
+      scanner_id: SEMGREP_SCANNER_ID,
+      payload,
+    },
+    file_path: finding.filePath,
+    line: finding.startLine,
+    observed_at: observedAt,
+    args_fingerprint_sha256: argsFingerprint,
+    redacted: wasRedacted,
+  };
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

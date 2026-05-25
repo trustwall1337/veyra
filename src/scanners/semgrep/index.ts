@@ -1,5 +1,9 @@
-export { buildSemgrepArgs, runSemgrep } from './adapter.js';
-export { parseSemgrepJson } from './parser.js';
+export {
+  SEMGREP_SCANNER_ID,
+  buildSemgrepArgs,
+  runSemgrep,
+} from './adapter.js';
+export { parseSemgrepJson, type SemgrepParsed } from './parser.js';
 export type {
   SemgrepError,
   SemgrepFinding,

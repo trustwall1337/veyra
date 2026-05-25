@@ -3,9 +3,18 @@ import { type Result, err, ok } from '../../types/result.js';
 
 import type {
   SemgrepFinding,
-  SemgrepOutput,
   SemgrepSeverity,
 } from './types.js';
+
+/**
+ * Parser-side shape: findings + non-fatal errors only. The adapter
+ * adds `facts` (ScanFact[]) on top of this when assembling
+ * `SemgrepOutput`.
+ */
+export interface SemgrepParsed {
+  readonly findings: readonly SemgrepFinding[];
+  readonly nonFatalErrors: readonly string[];
+}
 
 const SCANNER = 'semgrep';
 const ALLOWED_SEVERITIES: readonly SemgrepSeverity[] = [
@@ -50,6 +59,27 @@ function readLines(entry: Record<string, unknown>): {
   };
 }
 
+/** Extract byte offsets from `start.offset` / `end.offset` when present. */
+function readOffsets(entry: Record<string, unknown>): {
+  startOffset?: number;
+  endOffset?: number;
+} {
+  const start = isObject(entry.start) ? entry.start : undefined;
+  const end = isObject(entry.end) ? entry.end : undefined;
+  const startOffset =
+    typeof start?.offset === 'number' && start.offset >= 0
+      ? Math.floor(start.offset)
+      : undefined;
+  const endOffset =
+    typeof end?.offset === 'number' && end.offset >= 0
+      ? Math.floor(end.offset)
+      : undefined;
+  return {
+    ...(startOffset !== undefined ? { startOffset } : {}),
+    ...(endOffset !== undefined ? { endOffset } : {}),
+  };
+}
+
 /**
  * Parse `semgrep --json` stdout into normalized findings.
  *
@@ -76,7 +106,7 @@ function readLines(entry: Record<string, unknown>): {
  */
 export function parseSemgrepJson(
   stdout: string,
-): Result<SemgrepOutput, ScannerOutputParseError> {
+): Result<SemgrepParsed, ScannerOutputParseError> {
   const trimmed = stdout.trim();
   if (trimmed === '') {
     return ok({ findings: [], nonFatalErrors: [] });
@@ -117,6 +147,9 @@ export function parseSemgrepJson(
       if (!isObject(entry)) continue;
       const extra = isObject(entry.extra) ? entry.extra : {};
       const { startLine, endLine } = readLines(entry);
+      const offsets = readOffsets(entry);
+      const lines =
+        typeof extra.lines === 'string' ? extra.lines : undefined;
       findings.push({
         ruleId: asString(entry.check_id, 'unknown-rule'),
         filePath: asString(entry.path, '<unknown-file>'),
@@ -124,6 +157,8 @@ export function parseSemgrepJson(
         endLine,
         message: asString(extra.message, ''),
         severity: asSeverity(extra.severity),
+        ...offsets,
+        ...(lines !== undefined ? { lines } : {}),
       });
     }
   }

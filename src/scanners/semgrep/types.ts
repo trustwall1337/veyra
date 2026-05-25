@@ -3,6 +3,7 @@ import type {
   ScannerNotInstalledError,
   ScannerOutputParseError,
 } from '../../types/errors.js';
+import type { ScanFact } from '../../types/scan-fact.js';
 
 /** Input to {@link runSemgrep}. */
 export interface SemgrepInput {
@@ -35,11 +36,33 @@ export interface SemgrepFinding {
   readonly endLine: number;
   readonly message: string;
   readonly severity: SemgrepSeverity;
+  /**
+   * Byte offsets from `start.offset` / `end.offset` in the semgrep JSON
+   * (semgrep ≥ 1.x emits these). Optional because older versions or
+   * specific rule kinds may omit them.
+   */
+  readonly startOffset?: number;
+  readonly endOffset?: number;
+  /**
+   * Matched source lines as captured by semgrep (`extra.lines`).
+   * Optional. Used for ScanFact `sanitized_excerpt` after 02c
+   * sanitization; never read raw by AI prompts.
+   */
+  readonly lines?: string;
 }
 
-/** Output of {@link runSemgrep} on a successful run. */
+/**
+ * Output of {@link runSemgrep} on a successful run.
+ *
+ * `findings` is the pre-revision shape consumed by tool-runner (step 08).
+ * `facts` is the revision §3.1 + §9 step-07 row shape: generic
+ * `ScanFact[]` records with `payload.rule_id` populated so downstream
+ * predicates (cc-11-1 through cc-11-7) dispatch on the rule. Step 08b
+ * removes `findings`; until then the adapter dual-emits.
+ */
 export interface SemgrepOutput {
   readonly findings: readonly SemgrepFinding[];
+  readonly facts: readonly ScanFact[];
   /**
    * Non-fatal errors the scanner emitted (e.g. a rule failed to parse,
    * a file couldn't be read). Surfacing these lets the tool-runner agent

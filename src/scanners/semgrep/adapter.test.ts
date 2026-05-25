@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { registry } from '../../core/registry/service-registry.js';
 import {
   ScannerExecutionError,
   ScannerNotInstalledError,
@@ -11,7 +12,11 @@ import {
 } from '../../types/errors.js';
 import { isErr, isOk } from '../../types/result.js';
 
-import { buildSemgrepArgs, runSemgrep } from './adapter.js';
+import {
+  SEMGREP_SCANNER_ID,
+  buildSemgrepArgs,
+  runSemgrep,
+} from './adapter.js';
 import type {
   SemgrepRunner,
   SemgrepRunnerResult,
@@ -249,6 +254,98 @@ describe('runSemgrep — failure paths', () => {
     expect(isErr(result)).toBe(true);
     if (isErr(result)) {
       expect(result.error).toBeInstanceOf(ScannerOutputParseError);
+    }
+  });
+});
+
+describe('runSemgrep — ScanFact emission (step 07b)', () => {
+  it('emits one ScanFact per parsed finding with payload.rule_id', async () => {
+    const stdout = await loadFixture('with-findings');
+    const result = await runSemgrep(
+      { projectPath: '/proj', rulesPath: '/rules' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    expect(result.value.facts.length).toBe(result.value.findings.length);
+    for (let i = 0; i < result.value.facts.length; i += 1) {
+      const fact = result.value.facts[i];
+      const finding = result.value.findings[i];
+      expect(fact).toBeDefined();
+      expect(finding).toBeDefined();
+      if (fact === undefined || finding === undefined) continue;
+      expect(fact.source.kind).toBe('scanner_match');
+      if (fact.source.kind === 'scanner_match') {
+        expect(fact.source.payload.rule_id).toBe(finding.ruleId);
+        expect(fact.source.payload.content_kind).toBe('text');
+      }
+    }
+  });
+
+  it('mints a scanner_id that resolves via the service registry', () => {
+    const lookup = registry.lookupScanner(SEMGREP_SCANNER_ID);
+    expect(isOk(lookup)).toBe(true);
+    if (isOk(lookup)) {
+      expect(lookup.value.id as string).toBe('semgrep');
+    }
+  });
+
+  it('populates byte_range from semgrep start.offset / end.offset when present', async () => {
+    const stdout = JSON.stringify({
+      results: [
+        {
+          check_id: 'rules.authz.direct-object-access-by-id',
+          path: 'src/pages/OrderPage.tsx',
+          start: { line: 12, offset: 240 },
+          end: { line: 18, offset: 480 },
+          extra: { message: 'order_id read from query', severity: 'WARNING' },
+        },
+      ],
+      errors: [],
+    });
+    const result = await runSemgrep(
+      { projectPath: '/proj', rulesPath: '/rules' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    const fact = result.value.facts[0];
+    expect(fact).toBeDefined();
+    if (fact !== undefined && fact.source.kind === 'scanner_match') {
+      expect(fact.source.payload.byte_range).toEqual({ start: 240, end: 480 });
+    }
+  });
+
+  it('runs the captured `extra.lines` through 02c sanitization and sets redacted accordingly', async () => {
+    const fakeAwsKey = ['AK', 'IA', 'IOSFODNN7EXAMPLE'].join('');
+    const stdout = JSON.stringify({
+      results: [
+        {
+          check_id: 'rules.secrets.aws-key-in-source',
+          path: 'src/lib/secrets.ts',
+          start: { line: 1, offset: 0 },
+          end: { line: 1, offset: 30 },
+          extra: {
+            message: 'AWS key in source',
+            severity: 'ERROR',
+            lines: `const key = "${fakeAwsKey}";`,
+          },
+        },
+      ],
+      errors: [],
+    });
+    const result = await runSemgrep(
+      { projectPath: '/proj', rulesPath: '/rules' },
+      staticRunner({ stdout, stderr: '', exitCode: 1 }),
+    );
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    const fact = result.value.facts[0];
+    expect(fact).toBeDefined();
+    if (fact !== undefined && fact.source.kind === 'scanner_match') {
+      expect(fact.source.payload.sanitized_excerpt).not.toContain(fakeAwsKey);
+      expect(fact.source.payload.sanitized_excerpt).toContain('REDACTED');
+      expect(fact.redacted).toBe(true);
     }
   });
 });
