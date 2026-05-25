@@ -1,6 +1,6 @@
 # Step 17c — AI Product-Understanding agent + `declared-context-builder` composer
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §1 layers 1b + 1c, §7.1 composer ownership, §12b opt-in matrix`
 **Amends Phase 1 step:** 17 (sibling of 17b)
 **Produces:** AI agent at `src/agents/ai-product-understanding/` + deterministic composer at `src/core/declared-context/`
