@@ -11,17 +11,24 @@ import type { ReadinessReport } from '../../types/readiness-report.js';
 
 import { renderActiveOutcomesSection } from './sections/active-outcomes.js';
 import {
-  renderAiConcernsOmittedSection,
   renderAiConcernsSection,
   type AiConcernThreshold,
 } from './sections/ai-concerns.js';
 import { STRINGS } from './strings.js';
 
+export interface AiUsageSummary {
+  readonly provider?: string;
+  readonly model?: string;
+  readonly call_count?: number;
+  readonly cache_hit_ratio?: number;
+}
+
 export interface MarkdownReportOptions {
   /**
    * AIConcern entries produced by Pass-2 disposition (revision §11
-   * tier 2). When `undefined`, the report assumes AI was disabled and
-   * renders the omitted-section banner instead.
+   * tier 2). When `undefined`, the AIConcerns tier is OMITTED from
+   * the report entirely (per step 13b contract); Sources carries the
+   * disabled-AI note instead.
    */
   readonly aiConcerns?: readonly AIConcern[];
   /**
@@ -29,6 +36,14 @@ export interface MarkdownReportOptions {
    * revision §14 Q6.
    */
   readonly aiConcernThreshold?: AiConcernThreshold;
+  /**
+   * AI usage summary for the Sources section (revision §11 +
+   * step 13b). When present and `aiConcerns` is set, the Sources
+   * section lists provider / model / call_count / cache_hit_ratio.
+   * When `aiConcerns` is undefined, the Sources section carries the
+   * `AI was disabled for this scan` note instead.
+   */
+  readonly aiUsage?: AiUsageSummary;
 }
 
 function renderFinding(f: Finding): string {
@@ -97,31 +112,53 @@ function renderControlCards(report: ReadinessReport): string {
   return sections.join('\n').trim();
 }
 
+function renderSourcesSection(options: MarkdownReportOptions): string {
+  const lines: string[] = [STRINGS.HEADING_SOURCES, '', STRINGS.SOURCES_HEADER];
+  if (options.aiConcerns === undefined) {
+    // --no-ai mode: tier 2 was omitted from the body; Sources carries
+    // the disabled-AI note per step 13b contract.
+    lines.push('', STRINGS.SOURCES_AI_DISABLED);
+  } else {
+    // AI was enabled. Render usage summary when supplied.
+    const u = options.aiUsage;
+    if (u !== undefined) {
+      lines.push('', STRINGS.SOURCES_AI_USAGE_PREFIX);
+      if (u.provider !== undefined) lines.push(`- provider: \`${u.provider}\``);
+      if (u.model !== undefined) lines.push(`- model: \`${u.model}\``);
+      if (u.call_count !== undefined) {
+        lines.push(`- ai_call_count: ${String(u.call_count)}`);
+      }
+      if (u.cache_hit_ratio !== undefined) {
+        lines.push(`- cache_hit_ratio: ${u.cache_hit_ratio.toFixed(3)}`);
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
 export function renderMarkdownReport(
   report: ReadinessReport,
   options: MarkdownReportOptions = {},
 ): string {
   const threshold = options.aiConcernThreshold ?? 'medium';
-  const tier2 =
-    options.aiConcerns === undefined
-      ? renderAiConcernsOmittedSection()
-      : renderAiConcernsSection(options.aiConcerns, threshold);
   const sections: string[] = [
     `# Veyra launch-readiness report`,
     '',
     renderExecutiveSummary(report),
     '',
     renderLaunchBlockers(report),
-    '',
-    tier2,
-    '',
-    renderActiveOutcomesSection(),
-    '',
-    renderControlCards(report),
-    '',
-    STRINGS.HEADING_SOURCES,
-    '',
-    STRINGS.SOURCES_HEADER,
   ];
+  // Tier 2 is OMITTED entirely when AI is disabled (per step 13b
+  // contract). The Sources section below carries the disabled note.
+  if (options.aiConcerns !== undefined) {
+    sections.push('');
+    sections.push(renderAiConcernsSection(options.aiConcerns, threshold));
+  }
+  sections.push('');
+  sections.push(renderActiveOutcomesSection());
+  sections.push('');
+  sections.push(renderControlCards(report));
+  sections.push('');
+  sections.push(renderSourcesSection(options));
   return sections.join('\n').trimEnd() + '\n';
 }

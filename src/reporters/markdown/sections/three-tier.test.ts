@@ -49,11 +49,31 @@ describe('three-tier rendering — section presence', () => {
     expect(md).toContain('appear launch-blocking');
   });
 
-  it('--no-ai path: AIConcerns section says AI was disabled', () => {
+  it('--no-ai path: tier 2 OMITTED from body; Sources carries the disabled-AI note', () => {
     const md = renderMarkdownReport(report); // no aiConcerns option = disabled
-    expect(md).toContain(AI_CONCERNS_HEADING);
-    expect(md).toContain('AI was disabled');
-    expect(md).not.toContain('No AI concerns were produced');
+    // Tier 2 must NOT appear in the body.
+    expect(md).not.toContain(AI_CONCERNS_HEADING);
+    // Sources carries the disabled-AI note.
+    expect(md).toContain('## Sources and scanner metadata');
+    expect(md).toContain('AI was disabled for this scan');
+  });
+
+  it('AI-enabled path renders Sources AI usage when aiUsage is supplied', () => {
+    const md = renderMarkdownReport(report, {
+      aiConcerns: [],
+      aiUsage: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        call_count: 3,
+        cache_hit_ratio: 0.75,
+      },
+    });
+    expect(md).toContain('## Sources and scanner metadata');
+    expect(md).toContain('provider: `anthropic`');
+    expect(md).toContain('model: `claude-sonnet-4-6`');
+    expect(md).toContain('ai_call_count: 3');
+    expect(md).toContain('cache_hit_ratio: 0.750');
+    expect(md).not.toContain('AI was disabled');
   });
 });
 

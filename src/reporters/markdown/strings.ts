@@ -42,6 +42,10 @@ export const STRINGS = {
 
   SOURCES_HEADER: 'This section lists which scanners and connectors checked which controls.',
 
+  SOURCES_AI_DISABLED:
+    'AI was disabled for this scan; AIConcerns not produced.',
+  SOURCES_AI_USAGE_PREFIX: 'AI usage:',
+
   MCP_DECLARED_NOT_VERIFIED:
     '(declared via MCP — not verified at runtime)',
   ACTIVE_VALIDATION_NOT_RUN:
