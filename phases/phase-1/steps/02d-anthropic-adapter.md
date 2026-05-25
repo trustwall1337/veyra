@@ -1,6 +1,6 @@
 # Step 02d — Anthropic adapter
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §7.2, §12 ordering, §12b opt-in matrix`; `PHASE_2_PLAN §1.3, §10.4, §10.6`
 **Amends Phase 1 step:** none — new step file
 **Produces:** `src/ai/anthropic.ts` — the only file in the repo that imports `@anthropic-ai/sdk`
