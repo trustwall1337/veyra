@@ -1,6 +1,6 @@
 # Step 10 — Authn agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 10`, §4.2
 **Produces:** `src/agents/authn/`
 **Depends on:** 02, 04, 08
