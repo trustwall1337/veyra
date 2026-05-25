@@ -1,6 +1,6 @@
 # Step 03b — CLI revision: AI flags wired per §12b opt-in matrix
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `REVISION_AI_SHAPE.md §12b opt-in matrix`; revision §14 Q3, Q4, Q6
 **Amends Phase 1 step:** 03
 **Produces:** CLI extension at `src/cli/scan-command.ts` + help text

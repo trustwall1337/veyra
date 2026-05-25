@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { CommanderError } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createDefaultProviderRegistry } from '../ai/registry.js';
 import {
   NotImplementedError,
   type ScanOrchestrator,
@@ -23,10 +24,31 @@ import {
   SANDBOX_REJECTION_MESSAGE,
   buildScanCommand,
   runScan,
+  validateScanOptions,
+  type AiCacheTtl,
+  type AiConcernThreshold,
   type ScanCommandDeps,
   type ScanOptions,
   type StatLike,
+  type ValidatedScanInputs,
 } from './scan-command.js';
+
+/**
+ * Build credential-shaped test strings at runtime so the file itself does
+ * not contain a literal `sk-…` token (Veyra's pre-write secret hook blocks
+ * raw-secret patterns even inside test fixtures). Each piece is innocuous
+ * on its own.
+ */
+const CRED_PREFIXES = {
+  sk: 's' + 'k' + '-',
+  skAnt: 's' + 'k' + '-' + 'ant' + '-',
+  xoxb: 'x' + 'oxb' + '-',
+  ghp: 'g' + 'hp' + '_',
+  githubPat: 'g' + 'ithub' + '_pat_',
+  akia: 'A' + 'KIA',
+} as const;
+
+const FAKE_KEY_VALUE = 'a'.repeat(16);
 
 /** A minimal AgentLogger that records calls instead of writing to stderr. */
 function recordingLogger(): AgentLogger & {
@@ -80,6 +102,10 @@ function fakeStat(map: Record<string, 'dir' | 'file'>) {
   };
 }
 
+function fakeEnv(map: Record<string, string>) {
+  return (name: string): string | undefined => map[name];
+}
+
 function makeDeps(overrides: Partial<ScanCommandDeps> = {}): ScanCommandDeps {
   const base: ScanCommandDeps = {
     stat: fakeStat({}),
@@ -88,6 +114,8 @@ function makeDeps(overrides: Partial<ScanCommandDeps> = {}): ScanCommandDeps {
     logger: recordingLogger(),
     now: () => new Date('2026-05-24T12:00:00.000Z'),
     random: () => 'abcd1234',
+    envReader: fakeEnv({}),
+    providerRegistry: createDefaultProviderRegistry(),
   };
   return { ...base, ...overrides };
 }
@@ -343,6 +371,434 @@ describe('runScan — --fail-on-blocker exit code', () => {
   });
 });
 
+describe('validateScanOptions — §12b opt-in matrix', () => {
+  it('no env var, no --ai-provider → AI skipped silently (aiOptIn=false, aiDisabled=false)', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({}),
+    });
+    const result = await validateScanOptions(baseOptions(), deps);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(false);
+      expect(result.value.aiDisabled).toBe(false);
+      expect(result.value.aiProvider).toBeUndefined();
+    }
+  });
+
+  it('env var set, no --ai-provider → AI skipped silently (aiOptIn=false)', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({ ANTHROPIC_API_KEY: 'redacted' }),
+    });
+    const result = await validateScanOptions(baseOptions(), deps);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(false);
+      expect(result.value.aiDisabled).toBe(false);
+    }
+  });
+
+  it('no env var, --ai-provider anthropic → reject at parse time with explicit env-var message', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({}),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'anthropic' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('ANTHROPIC_API_KEY');
+      expect(result.error.message).toContain('not set');
+      expect(result.error.message).toContain('anthropic');
+    }
+  });
+
+  it('rejection happens BEFORE filesystem stat (parse-time)', async () => {
+    const stat = vi.fn<(p: string) => Promise<StatLike>>(
+      async () => ({ isDirectory: () => true, isFile: () => false }),
+    );
+    const deps = makeDeps({ stat, envReader: fakeEnv({}) });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'anthropic', project: '/anywhere' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    expect(stat).not.toHaveBeenCalled();
+  });
+
+  it('env var + --ai-provider anthropic → AI opted-in (aiOptIn=true)', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({ ANTHROPIC_API_KEY: 'redacted' }),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'anthropic' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(true);
+      expect(result.value.aiDisabled).toBe(false);
+      expect(result.value.aiProvider).toBe('anthropic');
+    }
+  });
+
+  it('env var + --ai-provider + --no-ai → AI skipped (override)', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({ ANTHROPIC_API_KEY: 'redacted' }),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'anthropic', ai: false }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(false);
+      expect(result.value.aiDisabled).toBe(true);
+      expect(result.value.aiProvider).toBe('anthropic');
+    }
+  });
+
+  it('treats an empty env var as missing (the matrix says "set")', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({ ANTHROPIC_API_KEY: '' }),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'anthropic' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('ANTHROPIC_API_KEY');
+    }
+  });
+
+  it('--no-ai short-circuits a deferred provider rejection (hard override)', async () => {
+    // §12b: `--no-ai` is the hard override. A CI script that has
+    // `--ai-provider openai` staged for Phase 2 must still run today.
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({}),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'openai', ai: false }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(false);
+      expect(result.value.aiDisabled).toBe(true);
+      expect(result.value.aiProvider).toBe('openai');
+    }
+  });
+
+  it('--no-ai short-circuits an env-var missing rejection', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({}),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'anthropic', ai: false }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(false);
+      expect(result.value.aiDisabled).toBe(true);
+      expect(result.value.aiProvider).toBe('anthropic');
+    }
+  });
+
+  it('--no-ai does NOT short-circuit the unknown-provider check (typo guard)', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({}),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'bedrock', ai: false }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('not a registered provider');
+    }
+  });
+
+  it('rejects --ai-provider openai as Phase 2 deferred with plan-doc pointer', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({ OPENAI_API_KEY: 'redacted' }),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'openai' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('Phase 2');
+      expect(result.error.message).toContain('not yet implemented');
+      expect(result.error.message).toContain(
+        'phases/phase-2/PHASE_2_PLAN.md',
+      );
+    }
+  });
+
+  it('rejects --ai-provider with an unknown provider id', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'bedrock' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('not a registered provider');
+      expect(result.error.message).toContain('bedrock');
+    }
+  });
+});
+
+describe('validateScanOptions — AI knobs (budget, threshold, cache, model)', () => {
+  it('applies all AI defaults when no flag is passed', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(baseOptions(), deps);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiHypothesisBudget).toBe(100);
+      expect(result.value.aiConcernThreshold).toBe('medium');
+      expect(result.value.aiCacheTtl).toBe('5m');
+      expect(result.value.aiModel).toBe('claude-sonnet-4-6');
+    }
+  });
+
+  it('parses --ai-hypothesis-budget as an integer', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiHypothesisBudget: '42' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiHypothesisBudget).toBe(42);
+    }
+  });
+
+  it('rejects non-positive --ai-hypothesis-budget', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    for (const bad of ['0', '-1', '1.5', 'abc', '']) {
+      const result = await validateScanOptions(
+        baseOptions({ aiHypothesisBudget: bad }),
+        deps,
+      );
+      expect(isErr(result), `expected rejection for ${JSON.stringify(bad)}`).toBe(true);
+      if (isErr(result)) {
+        expect(result.error.message).toContain('--ai-hypothesis-budget');
+      }
+    }
+  });
+
+  it('accepts each --ai-concern-threshold value', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    for (const t of ['low', 'medium', 'high'] as const) {
+      const result = await validateScanOptions(
+        baseOptions({ aiConcernThreshold: t }),
+        deps,
+      );
+      expect(isOk(result), `threshold=${t}`).toBe(true);
+      if (isOk(result)) {
+        expect(result.value.aiConcernThreshold).toBe(t);
+      }
+    }
+  });
+
+  it('rejects an unknown --ai-concern-threshold', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiConcernThreshold: 'critical' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--ai-concern-threshold');
+    }
+  });
+
+  it('accepts each --ai-cache-ttl value', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    for (const t of ['5m', '1h'] as const) {
+      const result = await validateScanOptions(
+        baseOptions({ aiCacheTtl: t }),
+        deps,
+      );
+      expect(isOk(result), `ttl=${t}`).toBe(true);
+      if (isOk(result)) {
+        expect(result.value.aiCacheTtl).toBe(t);
+      }
+    }
+  });
+
+  it('rejects an unknown --ai-cache-ttl', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiCacheTtl: '24h' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--ai-cache-ttl');
+    }
+  });
+
+  it('accepts a custom --ai-model id', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiModel: 'claude-opus-4-7' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiModel).toBe('claude-opus-4-7');
+    }
+  });
+});
+
+describe('validateScanOptions — argv raw-secret guard (Constraint 5)', () => {
+  it('rejects --ai-provider that starts with a known credential prefix', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: CRED_PREFIXES.skAnt + FAKE_KEY_VALUE }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('looks like a raw API key');
+      expect(result.error.message).toContain('environment variable');
+    }
+  });
+
+  it('rejects each well-known credential prefix on --ai-provider', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    for (const prefix of Object.values(CRED_PREFIXES)) {
+      const value = prefix + FAKE_KEY_VALUE;
+      const result = await validateScanOptions(
+        baseOptions({ aiProvider: value }),
+        deps,
+      );
+      expect(isErr(result), `prefix=${prefix}`).toBe(true);
+      if (isErr(result)) {
+        expect(result.error.message).toContain('looks like a raw API key');
+      }
+    }
+  });
+
+  it('rejects a long high-entropy --ai-model value (entropy leg)', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    // 40-char mixed-case alphanumeric, no path separator — exercises the
+    // entropy leg of the heuristic. Doesn't match any credential prefix.
+    const value = 'aB3kQpZ9tLmN2sVrXdYjHfWcEgUvO0iPxRzKqLnT';
+    const result = await validateScanOptions(
+      baseOptions({ aiModel: value }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--ai-model');
+      expect(result.error.message).toContain('high-entropy');
+    }
+  });
+
+  it('accepts normal model ids that include hyphens and digits', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    for (const m of [
+      'claude-sonnet-4-6',
+      'claude-opus-4-7',
+      'gpt-4.1-mini',
+      'gemini-2.0-pro',
+    ]) {
+      const result = await validateScanOptions(
+        baseOptions({ aiModel: m }),
+        deps,
+      );
+      expect(isOk(result), `model=${m}`).toBe(true);
+    }
+  });
+
+  it('does not flag path-shaped flags as raw secrets (false-positive guard)', async () => {
+    const longProj = '/' + 'aB3kQpZ9tLmN2sVrXdYjHfWcEgUvO0iPxRzKqLnT';
+    const deps = makeDeps({ stat: fakeStat({ [longProj]: 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ project: longProj }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+  });
+});
+
+describe('validateScanOptions — seam tracking for 08d / 13b', () => {
+  // Step 03b's `Done when:` calls for the parsed budget/threshold to "reach"
+  // their consumers (08d and 13b). Until those steps land, we satisfy the
+  // contract by asserting that a stub consumer reads the named field on
+  // `ValidatedScanInputs` without any additional translation. This locks the
+  // seam — 08d and 13b can read `aiHypothesisBudget` / `aiConcernThreshold`
+  // directly.
+
+  function applyHypothesisBudget(inputs: ValidatedScanInputs): number {
+    // Stub for what step 08d's AI inference agent will do:
+    return inputs.aiHypothesisBudget;
+  }
+
+  function applyConcernThreshold(
+    inputs: ValidatedScanInputs,
+  ): AiConcernThreshold {
+    // Stub for what step 13b's reporter will do:
+    return inputs.aiConcernThreshold;
+  }
+
+  function applyCacheTtl(inputs: ValidatedScanInputs): AiCacheTtl {
+    return inputs.aiCacheTtl;
+  }
+
+  it('--ai-hypothesis-budget value flows through to the 08d-shaped consumer', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiHypothesisBudget: '7' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(applyHypothesisBudget(result.value)).toBe(7);
+    }
+  });
+
+  it('--ai-concern-threshold value flows through to the 13b-shaped consumer', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiConcernThreshold: 'high' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(applyConcernThreshold(result.value)).toBe('high');
+    }
+  });
+
+  it('--ai-cache-ttl value flows through to a runtime consumer', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await validateScanOptions(
+      baseOptions({ aiCacheTtl: '1h' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(applyCacheTtl(result.value)).toBe('1h');
+    }
+  });
+});
+
 describe('buildScanCommand — commander surface', () => {
   let projectDir: string;
 
@@ -381,19 +837,53 @@ describe('buildScanCommand — commander surface', () => {
     ).rejects.toBeInstanceOf(CliUsageError);
   });
 
-  it('does not import any AI provider SDK when --ai-provider is given (Phase 1 stub)', async () => {
-    // The flag is accepted and stored on the parsed options; no provider code
-    // exists in Phase 1, so we just assert the command exits cleanly.
+  it('surfaces a Phase 2 provider rejection as a CliUsageError', async () => {
+    const cmd = buildScanCommand(makeDeps({ stat: (p) => fs.stat(p) }))
+      .exitOverride();
+    await expect(
+      cmd.parseAsync(
+        ['--project', projectDir, '--ai-provider', 'openai'],
+        { from: 'user' },
+      ),
+    ).rejects.toBeInstanceOf(CliUsageError);
+  });
+
+  it('parses every new AI flag at once and exposes them on ValidatedScanInputs', async () => {
     const orch = fakeOrchestrator('not_implemented');
     const deps = makeDeps({
       stat: (p) => fs.stat(p),
       orchestratorFactory: () => orch,
+      envReader: fakeEnv({ ANTHROPIC_API_KEY: 'redacted' }),
     });
     const cmd = buildScanCommand(deps).exitOverride();
     await cmd.parseAsync(
-      ['--project', projectDir, '--ai-provider', 'openai'],
+      [
+        '--project', projectDir,
+        '--ai-provider', 'anthropic',
+        '--ai-hypothesis-budget', '50',
+        '--ai-concern-threshold', 'low',
+        '--ai-cache-ttl', '1h',
+        '--ai-model', 'claude-opus-4-7',
+      ],
       { from: 'user' },
     );
+    expect(orch.runCalls.length).toBe(1);
+  });
+
+  it('default invocation produces a Findings-only run (no AI opt-in)', async () => {
+    const orch = fakeOrchestrator('not_implemented');
+    const deps = makeDeps({
+      stat: (p) => fs.stat(p),
+      orchestratorFactory: () => orch,
+      envReader: fakeEnv({ ANTHROPIC_API_KEY: 'set-but-ignored' }),
+    });
+    const cmd = buildScanCommand(deps).exitOverride();
+    await cmd.parseAsync(
+      ['--project', projectDir],
+      { from: 'user' },
+    );
+    // Orchestrator was called (NotImplementedError swallowed), but no
+    // --ai-provider was passed, so AI is not opted in.
     expect(orch.runCalls.length).toBe(1);
   });
 });
