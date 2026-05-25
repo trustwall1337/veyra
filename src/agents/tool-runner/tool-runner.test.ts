@@ -174,23 +174,29 @@ describe('toolRunnerAgent', () => {
     // path therefore has zero findings.
     expect(result.findings).toHaveLength(0);
 
-    // The new artifact is scan-facts (revision §3.1). Each scanner
-    // adapter dual-emits its facts; tool-runner aggregates them.
+    // The new artifact is scan-facts (revision §3.1 + retro-08b).
+    // The artifact value contains the consolidated ScanFact[] only —
+    // not the wrapper object that includes per-scanner sections. The
+    // sections remain on the in-memory ToolRunnerOutput for upstream
+    // diagnostic use.
     expect(result.artifacts).toHaveLength(1);
     expect(result.artifacts[0]!.kind).toBe('scan_facts');
+    // The artifact-store basename mapping writes scan-facts.json
+    // (dashes) per FPP §9.3 + revision §9 step-08-row.
+    expect(result.artifacts[0]!.path.endsWith('scan-facts.json')).toBe(true);
     const onDisk = await fs.readFile(result.artifacts[0]!.path, 'utf8');
     const parsed = JSON.parse(onDisk) as {
       value: {
-        scannerSections: unknown[];
-        scanFacts: { fact_id: string; source: { kind: string } }[];
+        scan_facts: { fact_id: string; source: { kind: string } }[];
       };
     };
-    expect(parsed.value.scannerSections).toHaveLength(3);
-    expect(parsed.value.scanFacts.length).toBeGreaterThan(0);
+    expect(parsed.value.scan_facts.length).toBeGreaterThan(0);
     // Each ScanFact carries `source.kind = 'scanner_match'`.
-    for (const f of parsed.value.scanFacts) {
+    for (const f of parsed.value.scan_facts) {
       expect(f.source.kind).toBe('scanner_match');
     }
+    // The agent-level output still exposes scannerSections in memory.
+    expect(result.output?.scannerSections).toHaveLength(3);
   });
 
   it('missing binary: one scanner returns coverage_gap, others still complete', async () => {

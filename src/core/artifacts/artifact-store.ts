@@ -24,6 +24,29 @@ export interface ArtifactStore {
 }
 
 /**
+ * Map an ArtifactKind to the on-disk basename. Phase 1 artifact
+ * filenames in step files (FPP §9.3, revision §9 step-08-row) use
+ * dashes, while TypeScript discriminator strings use underscores.
+ * This mapping bridges the two without leaking provider names.
+ */
+function basenameFor(kind: ArtifactKind): string {
+  switch (kind) {
+    case 'scan_facts':
+      return 'scan-facts.json';
+    case 'control_cards':
+      return 'control-cards.json';
+    case 'declared_context':
+      return 'declared-context.json';
+    case 'evidence_inventory':
+      return 'evidence-inventory.json';
+    case 'veyra_report_md':
+      return 'veyra-report.md';
+    case 'veyra_report_json':
+      return 'veyra-report.json';
+  }
+}
+
+/**
  * Append-only artifact store on the local filesystem. One subdirectory per
  * scan id; one JSON file per ArtifactKind. The store refuses to overwrite
  * an existing artifact so the on-disk record is immutable for audit.
@@ -32,7 +55,7 @@ export function createFsArtifactStore(rootDir: string): ArtifactStore {
   return {
     async write(scanId, kind, value) {
       const dir = path.join(rootDir, scanId);
-      const file = path.join(dir, `${kind}.json`);
+      const file = path.join(dir, basenameFor(kind));
       try {
         await fs.mkdir(dir, { recursive: true });
       } catch (e) {

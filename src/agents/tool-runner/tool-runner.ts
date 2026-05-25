@@ -611,10 +611,16 @@ export const toolRunnerAgent: VeyraAgent<ToolRunnerInput, ToolRunnerOutput> = {
     }
 
     const store = createFsArtifactStore(context.artifactDir);
+    // Per revision §3.1 + step 08b: the scan-facts artifact contains
+    // the consolidated ScanFact[] only — not the wrapper object. The
+    // per-scanner section status (stderr, error summary, etc.) is
+    // accessible via the agent's in-memory output for the
+    // orchestrator's reporting needs; the durable artifact carries
+    // only facts so downstream predicates have a clean contract.
     const writeResult = await store.write(
       context.scanId,
       'scan_facts',
-      output,
+      { scan_facts: scanFacts },
     );
 
     const artifacts: ArtifactRef[] = [];

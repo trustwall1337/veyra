@@ -15,7 +15,7 @@ import type { AuthnInput, AuthnOutput } from './types.js';
 const METADATA: AgentMetadata = {
   id: 'authn',
   version: '0.1.0',
-  declared_dependencies: ['scanner-findings.json'],
+  declared_dependencies: ['scan-facts.json'],
 };
 
 const UNCERTAINTY_NOTE =
@@ -140,7 +140,7 @@ function coverageGap(controlId: 'cc-11-1' | 'cc-11-2'): Finding {
     blast_radius:
       controlId === 'cc-11-2' ? 'admin_access' : 'user_data',
     title: `${controlId === 'cc-11-1' ? 'Client-side route guard' : 'Admin route role-check'} was not checked`,
-    summary: `tool-runner did not produce scanner-findings.json, so Semgrep evidence could not be cited. Negative tests should be added once the artifact is available. ${UNCERTAINTY_NOTE}.`,
+    summary: `tool-runner did not produce scan-facts.json, so Semgrep evidence could not be cited. Negative tests should be added once the artifact is available. ${UNCERTAINTY_NOTE}.`,
     evidence_refs: [],
   };
 }
