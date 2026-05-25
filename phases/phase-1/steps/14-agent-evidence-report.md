@@ -1,6 +1,6 @@
 # Step 14 — Evidence and report agent
 
-**Status:** not started
+**Status:** done (2026-05-25)
 **Maps to:** `PHASE_1_PLAN §7 Task 13`, §4.7; `FINAL_PRODUCT_PLAN §9.3` control cards
 **Produces:** `src/agents/evidence-report/`
 **Depends on:** 02, 13
