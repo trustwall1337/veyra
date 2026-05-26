@@ -1,6 +1,6 @@
 # Step 09 — `ai-explainer` agent
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 7`, §4.10, §10.1, §10.5
 **Produces:** agent (`src/agents/ai-explainer/`)
 **Depends on:** 04
