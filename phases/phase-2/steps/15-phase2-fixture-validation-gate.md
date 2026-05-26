@@ -1,6 +1,6 @@
 # Step 15 — Phase 2 end-to-end fixture validation gate
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §8` success criteria
 **Produces:** verification only (no new `src/` code; new `.claude/commands/scan-fixture-active.md` if step 01 decision 6 chose "new command")
 **Depends on:** 14, 13
