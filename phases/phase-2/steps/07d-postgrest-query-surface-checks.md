@@ -1,6 +1,6 @@
 # Step 07d — PostgREST query-surface checks (cc-11-13 catalog additions)
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §11.13` (new control category — see PHASE_2_PLAN amendment); `REVISION_AI_SHAPE §3.3b RoleModel` (input to test parameterisation)
 **Amends Phase 2 step:** 07 (negative-test catalog)
 **Produces:** five new catalog files under `src/agents/sandbox-runner/test-catalog/`

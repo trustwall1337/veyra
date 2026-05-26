@@ -88,6 +88,14 @@ export const ACTIONS_REQUIRED_BY_CONTROL: Readonly<
   'cc-11-6': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
   'cc-11-9': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
   'cc-11-12': ['call_api_with_test_identity', 'verify_denial'],
+  // Step 2.07d: PostgREST query-surface checks. cc-11-13a is an
+  // exposure probe (no synthetic-data needed); the rest need at
+  // least one synthetic actor.
+  'cc-11-13a': ['call_api_with_test_identity'],
+  'cc-11-13b': ['create_synthetic_user', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-13c': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-13d': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-13e': ['create_synthetic_user', 'call_api_with_test_identity', 'verify_denial'],
 };
 
 export interface CompilerInputs {

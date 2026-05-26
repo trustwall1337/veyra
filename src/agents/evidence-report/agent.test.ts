@@ -48,11 +48,15 @@ function finding(overrides: Partial<Finding> & Pick<Finding, 'control_id'>): Fin
 }
 
 describe('controls.ts catalog', () => {
-  it('contains cc-11-1 through cc-11-12 exactly once each', () => {
+  it('contains cc-11-1 through cc-11-12 + the cc-11-13a..e Phase 2 additions, each unique', () => {
     const ids = CONTROLS.map((c) => c.control_id);
-    expect(new Set(ids).size).toBe(12);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicates
     for (let i = 1; i <= 12; i += 1) {
       expect(ids).toContain(`cc-11-${String(i)}`);
+    }
+    // Phase 2 step 2.07d additions (PostgREST query-surface checks):
+    for (const sub of ['a', 'b', 'c', 'd', 'e']) {
+      expect(ids).toContain(`cc-11-13${sub}`);
     }
   });
 

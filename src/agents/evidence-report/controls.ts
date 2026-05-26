@@ -101,6 +101,42 @@ export const CONTROLS: readonly ControlDefinition[] = [
     required_evidence_kinds: ['mcp_context'],
     owning_agent_ids: ['supabase-rls'],
   },
+  // Phase 2 step 2.07d: PostgREST query-surface checks (active only).
+  {
+    control_id: 'cc-11-13a',
+    expected_behavior:
+      'PostgREST OpenAPI spec at /rest/v1/ does not advertise sensitive tables to non-admin actors.',
+    required_evidence_kinds: ['active_validation'],
+    owning_agent_ids: ['sandbox-runner'],
+  },
+  {
+    control_id: 'cc-11-13b',
+    expected_behavior:
+      'PostgREST select=* does not return declared-private columns to non-admin actors.',
+    required_evidence_kinds: ['active_validation'],
+    owning_agent_ids: ['sandbox-runner'],
+  },
+  {
+    control_id: 'cc-11-13c',
+    expected_behavior:
+      'PostgREST neq / or filters cannot return cross-tenant rows to a tenant-scoped actor.',
+    required_evidence_kinds: ['active_validation'],
+    owning_agent_ids: ['sandbox-runner'],
+  },
+  {
+    control_id: 'cc-11-13d',
+    expected_behavior:
+      'PostgREST foreign-table embeds do not leak cross-tenant rows or sensitive columns.',
+    required_evidence_kinds: ['active_validation'],
+    owning_agent_ids: ['sandbox-runner'],
+  },
+  {
+    control_id: 'cc-11-13e',
+    expected_behavior:
+      'PostgREST filter on declared-private column does not return rows to non-admin actor.',
+    required_evidence_kinds: ['active_validation'],
+    owning_agent_ids: ['sandbox-runner'],
+  },
 ];
 
 export function findControl(id: string): ControlDefinition | undefined {

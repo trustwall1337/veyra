@@ -15,6 +15,11 @@ import cc115 from './cc-11-5-cross-tenant-read-rls-off.js';
 import cc116 from './cc-11-6-broad-rls-policy.js';
 import cc119 from './cc-11-9-all-auth-cross-tenant-access.js';
 import cc1112 from './cc-11-12-anon-to-private-bucket.js';
+import cc1113a from './cc-11-13a-openapi-table-enumeration.js';
+import cc1113b from './cc-11-13b-select-star-column-leak.js';
+import cc1113c from './cc-11-13c-cross-tenant-filter-bypass.js';
+import cc1113d from './cc-11-13d-foreign-table-embed-leak.js';
+import cc1113e from './cc-11-13e-private-column-filter-enumeration.js';
 
 import type { CatalogEntry } from './types.js';
 
@@ -27,6 +32,11 @@ export const ALL_ENTRIES: readonly CatalogEntry[] = [
   cc116,
   cc119,
   cc1112,
+  cc1113a,
+  cc1113b,
+  cc1113c,
+  cc1113d,
+  cc1113e,
 ];
 
 export function getCatalogControlIds(): readonly string[] {

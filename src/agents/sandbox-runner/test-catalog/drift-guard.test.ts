@@ -25,6 +25,12 @@ const PHASE2_ACTIVE_CONTROL_IDS = [
   'cc-11-6',
   'cc-11-9',
   'cc-11-12',
+  // Step 2.07d additions.
+  'cc-11-13a',
+  'cc-11-13b',
+  'cc-11-13c',
+  'cc-11-13d',
+  'cc-11-13e',
 ] as const;
 
 describe('Negative-test catalog drift guard A', () => {
