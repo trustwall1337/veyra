@@ -127,25 +127,68 @@ export function createSandboxRunnerAgent(): VeyraAgent<
           );
           continue;
         }
-        const accessToken = sessionByActor.get(actor.id) ?? '';
+        // Codex retro 2.08-actor-selection-and-session-mismatch +
+        // 2.08-target-method-hardcoded: pick the actor whose role
+        // matches the entry's actor_role parameter (when declared);
+        // honor compiled method/body/headers from entry.parameters.
+        // Empty access token on an authenticated catalog routes to
+        // inconclusive_no_session rather than silently sending no
+        // Authorization header.
+        const requestedRole =
+          typeof entry.parameters['actor_role'] === 'string'
+            ? (entry.parameters['actor_role'] as string)
+            : undefined;
+        const pickedActor =
+          requestedRole !== undefined
+            ? input.identities.find((i) => i.role === requestedRole) ?? actor
+            : actor;
+        const pickedToken = sessionByActor.get(pickedActor.id) ?? '';
+        if (
+          pickedToken === '' &&
+          !['cc-11-1', 'cc-11-12'].includes(entry.control_id)
+        ) {
+          results.push(
+            inconclusiveResult(entry.test_id, entry.control_id, 'no_session_for_actor'),
+          );
+          continue;
+        }
+        const compiledMethodRaw =
+          typeof entry.parameters['method'] === 'string'
+            ? (entry.parameters['method'] as string)
+            : 'GET';
+        const allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+        const compiledMethod = (allowedMethods as readonly string[]).includes(
+          compiledMethodRaw,
+        )
+          ? (compiledMethodRaw as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE')
+          : 'GET';
+        const compiledHeaders =
+          typeof entry.parameters['headers'] === 'object' &&
+          entry.parameters['headers'] !== null
+            ? (entry.parameters['headers'] as Record<string, string>)
+            : undefined;
+        const compiledBody =
+          typeof entry.parameters['body'] === 'object' &&
+          entry.parameters['body'] !== null
+            ? (entry.parameters['body'] as Record<string, unknown>)
+            : undefined;
 
-        // Construct the catalog-test input.
         const negInput: NegativeTestInput = {
-          actor,
+          actor: pickedActor,
           target: {
-            method: 'GET',
-            url: extractUrlFromParameters(entry.parameters) ?? entry.validated_target_ref.ref,
-            ...(typeof entry.parameters['body'] === 'object' && entry.parameters['body'] !== null
-              ? { body: entry.parameters['body'] as Record<string, unknown> }
-              : {}),
+            method: compiledMethod,
+            url:
+              extractUrlFromParameters(entry.parameters) ?? entry.validated_target_ref.ref,
+            ...(compiledBody !== undefined ? { body: compiledBody } : {}),
+            ...(compiledHeaders !== undefined ? { headers: compiledHeaders } : {}),
           },
-          accessToken,
+          accessToken: pickedToken,
           transport: input.transport,
         };
 
         try {
           const r = await withTimeout(catalogEntry.run(negInput), perTest, () =>
-            timeoutResult(entry.test_id, entry.control_id, perTest, actor),
+            timeoutResult(entry.test_id, entry.control_id, perTest, pickedActor),
           );
           results.push(r);
         } catch (cause) {

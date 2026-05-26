@@ -60,6 +60,17 @@ export interface SupabaseAdminClientOptions {
   readonly sdkClient?: AdminSdkLike;
   /** Override the API URL for testing / non-default deployments. */
   readonly apiUrl?: string;
+  /**
+   * Codex retro 2.06-orphan-probe-enumerates-users: orphan detection
+   * is now bookkeeping-driven, not enumeration-driven. Callers (and
+   * tests) supply a list of UIDs from prior-scan synthetic registries;
+   * the client verifies each via per-UID getUserById without ever
+   * touching listUsers. Production wires this to read from
+   * ~/.config/veyra/orphan-registry.json (the orphan-tracking file
+   * the synthetic-data-manager writes at synthesize time). Default
+   * implementation returns [] (clean / no historical state).
+   */
+  readonly knownOrphanUids?: readonly string[];
 }
 
 /**
@@ -245,29 +256,25 @@ export function createSupabaseAdminClient(
     },
 
     async findOrphanedSyntheticUsers() {
-      // One-shot bounded scan at construction. Per §Guardrails: this
-      // is the only allowed broad-query path. We page once at the
-      // default Supabase admin perPage (50). If a real deployment has
-      // > 50 Veyra orphans, the caller will see them on subsequent
-      // runs once the first 50 are cleaned up.
-      const r = await sdkClient.auth.admin.listUsers({ page: 1, perPage: 50 });
-      if (r.error !== null) {
-        return err(
-          new Error(
-            `supabase-admin orphan probe failed (status=${String(r.error.status)}): ${redact(r.error.message)}`,
-          ),
-        );
-      }
+      // Codex retro 2.06-orphan-probe-enumerates-users: orphan
+      // detection is bookkeeping-driven (NO listUsers in scan path).
+      // The caller supplies `knownOrphanUids` from the prior-scan
+      // synthetic registry. We probe each via getUserById; UIDs
+      // that still resolve are orphans, UIDs that 404 are clean.
+      const known = options.knownOrphanUids ?? [];
+      if (known.length === 0) return ok([]);
       const orphans: string[] = [];
-      for (const u of r.data.users) {
-        const md = u.user_metadata ?? {};
-        if (md['veyra_synthetic'] === true) orphans.push(u.id);
-        else if (
-          typeof u.email === 'string' &&
-          u.email.startsWith(SUPABASE_ADMIN_NAMESPACE_PREFIX)
-        ) {
-          orphans.push(u.id);
+      for (const uid of known) {
+        const r = await sdkClient.auth.admin.getUserById(uid);
+        if (r.error !== null && r.error.status === 404) continue;
+        if (r.error !== null) {
+          return err(
+            new Error(
+              `supabase-admin orphan probe failed for ${uid} (status=${String(r.error.status)}): ${redact(r.error.message)}`,
+            ),
+          );
         }
+        if (r.data.user !== null) orphans.push(uid);
       }
       return ok(orphans);
     },

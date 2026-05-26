@@ -17,8 +17,21 @@ explicitly approves.
   the negative-test catalog against a sandbox Supabase project the
   customer authorises via a signed approval file. Refused in
   production at the policy factory boundary (per step 2.03 codex
-  P203-002). Refused at parse-time without `--approve-active` (per
+  P203-002). Refused at parse-time without `--approve-active`,
+  `--supabase-sandbox`, and (in CI) `--approval-file` (per
   step 2.11).
+
+**Current end-to-end status (codex retro 2026-05-26).** The CLI
+parse-time gates for Mode B are wired (`--approve-active` /
+`--supabase-sandbox` / `--ci` / `--approval-file` / service-role-key
+NAME-only guard). The orchestrator two-phase runner that interleaves
+Synthesize → Exercise → Cleanup → Prove in a try/finally cleanup
+boundary is provided as a library at
+`src/agents/synthetic-data-manager/agent.ts` (`runSynthesizePhase` +
+`runCleanupPhase`) but is not yet plumbed into the production scan
+path. Until that wiring lands, the Mode B parse-time gates fire and
+Veyra rejects with the missing-prerequisite messages; the
+deterministic Phase 1 path remains the customer-runnable surface.
 
 ## Two sub-modes within Mode B
 

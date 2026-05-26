@@ -63,6 +63,13 @@ interface FakeAdminConfig {
 
 function fakeAdmin(config: FakeAdminConfig = {}): SupabaseAdminClient {
   const existing = new Map<string, string>(); // uid -> test_id
+  // Codex retro 2.06-orphan-probe-enumerates-users: orphan probe
+  // is now bookkeeping-driven. The test pre-populates `existing`
+  // with the orphan UIDs so findOrphanedSyntheticUsers reports them
+  // via getUserById probes (no listUsers).
+  for (const orph of config.initialOrphans ?? []) {
+    existing.set(orph, `pre-existing-${orph}`);
+  }
   const orphans: string[] = [...(config.initialOrphans ?? [])];
   const deleteCounts = config.deleteAttempts ?? new Map<string, number>();
   let nextId = 0;
@@ -99,7 +106,13 @@ function fakeAdmin(config: FakeAdminConfig = {}): SupabaseAdminClient {
       return ok(null);
     },
     async findOrphanedSyntheticUsers() {
-      return ok([...orphans]);
+      // Codex retro 2.06: bookkeeping-driven, no listUsers. The fake
+      // returns orphans that we pre-registered in `existing`.
+      const out: string[] = [];
+      for (const o of orphans) {
+        if (existing.has(o)) out.push(o);
+      }
+      return ok(out);
     },
   };
 }

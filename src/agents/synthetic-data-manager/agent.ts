@@ -92,6 +92,120 @@ export interface SyntheticDataManagerOutput {
   readonly cleanup_proof: CleanupProof;
 }
 
+/**
+ * Codex retro 2.06-cleanup-before-exercise: split synthesize and
+ * cleanup so the orchestrator can interleave Exercise between them.
+ * `runSynthesizePhase` creates resources and persists the registry;
+ * `runCleanupPhase` reads the registry and reverses every resource.
+ * The combined `run()` method below is kept for back-compat with
+ * tests that exercise both halves in one call.
+ */
+export interface SynthesizeOutput {
+  readonly identities: readonly TestIdentity[];
+  /** UIDs that the cleanup phase will need; mirror of the registry. */
+  readonly registry: readonly { readonly uid: string; readonly test_id: string }[];
+  /** Path to synthetic-resources.json the orchestrator persists. */
+  readonly resourcesArtifactPath: string;
+}
+
+export async function runSynthesizePhase(
+  input: SyntheticDataManagerInput,
+  context: AgentExecutionContext,
+): Promise<{ ok: true; value: SynthesizeOutput } | { ok: false; error: string }> {
+  // Orphan probe.
+  const orphans = await input.admin.findOrphanedSyntheticUsers();
+  if (!orphans.ok) {
+    return { ok: false, error: `orphan-detection failed: ${orphans.error.message}` };
+  }
+  if (orphans.value.length > 0) {
+    return {
+      ok: false,
+      error: `${String(orphans.value.length)} pre-existing Veyra synthetic resources detected. Manual cleanup required. UIDs: ${orphans.value.slice(0, 3).join(', ')}`,
+    };
+  }
+  const sleep = input.sleepMs ?? defaultSleep;
+  const registry: { uid: string; test_id: string; spec: SyntheticIdentitySpec }[] = [];
+  const identities: TestIdentity[] = [];
+
+  for (const spec of input.identities) {
+    const email =
+      spec.email ??
+      `veyra-synth-${context.scanId}-${spec.test_id}@example.invalid`;
+    const synth = await input.admin.createSyntheticUser({
+      scanId: context.scanId,
+      email,
+      metadata: { test_id: spec.test_id, role: spec.role },
+    });
+    if (!synth.ok) {
+      // Roll back: delete what we created so far.
+      await rollback(input.admin, registry, sleep, context);
+      return {
+        ok: false,
+        error: `synthesize failed at ${spec.test_id}: ${synth.error.message}. Rolled back ${String(registry.length)} resources.`,
+      };
+    }
+    registry.push({ uid: synth.value.uid, test_id: spec.test_id, spec });
+    identities.push({
+      id: spec.test_id,
+      scan_id: context.scanId,
+      provider_subject_id: synth.value.uid,
+      identity_provider_id: input.admin.id,
+      role: spec.role,
+      ...(spec.tenant_id !== undefined ? { tenant_id: spec.tenant_id } : {}),
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  // Persist synthetic-resources.json BEFORE returning so Exercise
+  // failure modes still leave a recoverable record for Cleanup.
+  const resourcesPath = path.join(
+    context.artifactDir,
+    SYNTHETIC_RESOURCES_ARTIFACT,
+  );
+  await fs.mkdir(context.artifactDir, { recursive: true });
+  await fs.writeFile(
+    resourcesPath,
+    JSON.stringify(
+      {
+        scan_id: context.scanId,
+        sub_mode: 'auto-synthesize',
+        identities: registry.map((r) => ({ uid: r.uid, test_id: r.test_id })),
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  return {
+    ok: true,
+    value: {
+      identities,
+      registry: registry.map((r) => ({ uid: r.uid, test_id: r.test_id })),
+      resourcesArtifactPath: resourcesPath,
+    },
+  };
+}
+
+export async function runCleanupPhase(
+  registry: ReadonlyArray<{ uid: string; test_id: string }>,
+  admin: SupabaseAdminClient,
+  context: AgentExecutionContext,
+  sleepMs?: (ms: number) => Promise<void>,
+): Promise<CleanupProof> {
+  const sleep = sleepMs ?? defaultSleep;
+  const startedAt = Date.now();
+  const outcome = await runCleanup(admin, registry, sleep, context);
+  return {
+    scan_id: context.scanId,
+    created_count: registry.length,
+    deleted_count: outcome.deleted,
+    residual_count: outcome.residual,
+    duration_ms: Date.now() - startedAt,
+    per_resource_log: outcome.log,
+  };
+}
+
 async function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

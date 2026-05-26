@@ -4,9 +4,12 @@ export {
   SYNTHETIC_DATA_MANAGER_AGENT_ID,
   SYNTHETIC_RESOURCES_ARTIFACT,
   createSyntheticDataManagerAgent,
+  runSynthesizePhase,
+  runCleanupPhase,
 } from './agent.js';
 export type {
   CleanupProof,
+  SynthesizeOutput,
   SyntheticDataManagerInput,
   SyntheticDataManagerOutput,
   SyntheticIdentitySpec,

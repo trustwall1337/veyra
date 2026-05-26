@@ -65,15 +65,28 @@ minisign signature):
 
 ## Gates the parser checks
 
-- Signature verification (Ed25519 minisign) — the deployment's
-  trusted public key must sign the file.
-- `scope.project_ref` must match `--supabase-sandbox`.
-- `scope.expires_at` must be in the future.
+- `scope.project_ref` must match `--supabase-sandbox`. (Enforced.)
+- `scope.expires_at` must be in the future. (Enforced.)
 - `<approval-file>.usage.json` counter file (lives next to the
   approval file) must show `scans_consumed < scope.max_scans`.
+  (Enforced.)
 - Each scan increments the counter and updates `last_consumed_at`.
+  (Enforced.)
 - Rotating an approval = delete the counter file OR revoke the
   approval file.
+- **Signature verification (Ed25519 minisign) — NOT yet enforced.**
+  The approval-file parser reads the `signature` field but does not
+  verify it against a trusted public key. This is a known follow-up
+  (codex retro 2.11-approval-signature-not-verified) and lands with
+  the specific minisign npm library pick from step 2.01 decision 5.
+  Customers running Mode B before signature verify lands must treat
+  the approval file as integrity-trusted on its own (e.g. ship via
+  a secrets manager, not a public URL).
+- **`max_synthetic_records` budget enforcement — NOT yet wired into
+  the compiler.** The compiler currently checks per-scan caps from
+  `SyntheticDataPolicy` but not the approval-file's
+  `max_synthetic_records` against the compiled plan's record count.
+  Follow-up codex retro 2.11.
 
 ## Refusals
 

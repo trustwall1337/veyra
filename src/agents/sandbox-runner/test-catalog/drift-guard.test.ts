@@ -16,22 +16,14 @@ import { CONTROLS } from '../../evidence-report/controls.js';
 
 import { ALL_ENTRIES, getCatalogControlIds } from './index.js';
 
-const PHASE2_ACTIVE_CONTROL_IDS = [
-  'cc-11-1',
-  'cc-11-2',
-  'cc-11-3',
-  'cc-11-4',
-  'cc-11-5',
-  'cc-11-6',
-  'cc-11-9',
-  'cc-11-12',
-  // Step 2.07d additions.
-  'cc-11-13a',
-  'cc-11-13b',
-  'cc-11-13c',
-  'cc-11-13d',
-  'cc-11-13e',
-] as const;
+// Codex retro 2.07-drift-guard-hardcoded + 2.07d-controls-missing-
+// active-metadata: derive the expected set from controls.ts
+// `phase_2_active_supported: true` metadata rather than a hardcoded
+// array. New active-supported controls register intentionally on the
+// control definition; the drift guard picks them up automatically.
+const PHASE2_ACTIVE_CONTROL_IDS = CONTROLS
+  .filter((c) => c.phase_2_active_supported === true)
+  .map((c) => c.control_id);
 
 describe('Negative-test catalog drift guard A', () => {
   it('every catalog entry`s controlId exists in controls.ts', () => {
