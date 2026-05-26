@@ -1,6 +1,6 @@
 # Step 16 — Phase 2 documentation
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 12`, §13 migration
 **Produces:** docs (`docs/active-validation.md`, `docs/synthetic-data-and-cleanup.md`, `docs/ai-explanations.md`, `docs/approval-flow.md`) + update to `PHASE_1_PLAN.md §3 Step 4 "AI Security Reasoning — deferred to Phase 2"`
 **Depends on:** 15

@@ -251,6 +251,20 @@ constraints, and the per-agent dataflow lives in
 - [`phases/phase-1/decisions.md`](./phases/phase-1/decisions.md) —
   material architectural decisions made during Phase 1 implementation
   (currently: step 27 REST-default course-correction).
+- [`docs/active-validation.md`](./docs/active-validation.md) — Phase 2
+  active validation: Mode A vs Mode B, sub-mode B.1 (manifest) vs
+  B.2 (auto-synthesize), what's checked, what's never done.
+- [`docs/synthetic-data-and-cleanup.md`](./docs/synthetic-data-and-cleanup.md) —
+  Phase 2 synthetic-data lifecycle, cleanup contract, bounded auto-retry
+  semantics.
+- [`docs/ai-explanations.md`](./docs/ai-explanations.md) — Phase 2 AI
+  explainer: advisory only (never classifies, never decides), opt-in
+  matrix, confidence threshold.
+- [`docs/approval-flow.md`](./docs/approval-flow.md) — Phase 2 Mode B
+  approval flow: interactive prompt, CI signed approval file,
+  approval-file format + gates.
+- [`phases/phase-2/decisions.md`](./phases/phase-2/decisions.md) — Phase 2
+  blocking decisions (locked in step 2.01).
 
 ## Development
 

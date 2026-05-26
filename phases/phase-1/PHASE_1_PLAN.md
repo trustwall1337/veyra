@@ -402,7 +402,9 @@ The original Phase 1 plan placed AI Security Reasoning here as a flat
   records from `ScanFact[]` + declared context).
 - AI continues to run in Phase 2 across **AI Security Planner** (proposes
   scan plans from the closed catalog) and **`ai-explainer`** (explanations
-  + narrative + suggested-test refinement).
+  + narrative + suggested-test refinement). The Phase 2 AI integration
+  discipline lives at [`phases/phase-2/PHASE_2_PLAN.md`](../phase-2/PHASE_2_PLAN.md)
+  §10 (advisory-only contract, sanitization, audit, opt-in matrix).
 - The `AiProvider` interface + Anthropic adapter (previously Phase 2
   deliverable) move into the Phase 1 revision.
 - `--no-ai` continues to produce a complete deterministic report.
