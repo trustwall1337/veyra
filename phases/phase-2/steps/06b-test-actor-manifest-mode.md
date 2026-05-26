@@ -1,6 +1,6 @@
 # Step 06b — Test-actor manifest mode (operator-provided actors)
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §2 Mode B sub-mode B.1`; `REVISION_AI_SHAPE §3.3b RoleModel`
 **Amends Phase 2 step:** none — new step file; sibling of 06 (synthetic-data-manager)
 **Produces:** `src/agents/test-actor-manifest-reader/` + manifest schema at `src/types/test-actor-manifest.ts`
