@@ -1,6 +1,6 @@
 # Step 08 — `sandbox-runner` agent
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 6`, §3.3, §4.9, §12 (false-positive control)
 **Produces:** agent (`src/agents/sandbox-runner/`)
 **Depends on:** 06, 07
