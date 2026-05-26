@@ -71,3 +71,54 @@ export function defaultReadOnlyEvidencePolicy(
     approval: { required: false },
   };
 }
+
+// Step 2.03 codex P203-001: Mode B grants read actions PLUS the six
+// synthetic-data actions. Mode A's forbidden set IS Mode B's allowed
+// set's mutation half; this asymmetry is intentional so a Mode-A scan
+// can never accidentally invoke a synthetic action.
+const SANDBOX_ALLOWED_ACTIONS: ReadonlySet<AllowedAction> = new Set<AllowedAction>([
+  ...READ_ONLY_ACTIONS,
+  ...ACTIVE_ACTIONS,
+]);
+
+const SANDBOX_FORBIDDEN_ACTIONS: ReadonlySet<AllowedAction> = new Set<AllowedAction>();
+
+export class PolicyEnvironmentError extends Error {
+  override readonly name = 'PolicyEnvironmentError';
+}
+
+/**
+ * Non-production environments that may carry a sandbox_active_validation
+ * policy. Step 2.03 codex P203-002: Mode B must reject production at
+ * the policy-factory boundary, not just at the CLI parse guard.
+ */
+export type NonProductionEnvironmentType = Exclude<EnvironmentType, 'production'>;
+
+/**
+ * Build a sandbox_active_validation policy. Per step 2.03 codex P203-002:
+ * production environments are rejected at this factory — the CLI parse
+ * guard is necessary but not sufficient (a future test harness or
+ * agent could construct a policy directly).
+ */
+export function defaultSandboxActiveValidationPolicy(
+  env: EnvironmentType,
+): import('./result.js').Result<ValidationPolicy, PolicyEnvironmentError> {
+  if (env === 'production') {
+    return {
+      ok: false,
+      error: new PolicyEnvironmentError(
+        'sandbox_active_validation may NOT be constructed against environment=production; production-safe mode is a later phase (FPP §17 Phase 5)',
+      ),
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      mode: 'sandbox_active_validation',
+      environment: env,
+      allowed_actions: SANDBOX_ALLOWED_ACTIONS,
+      forbidden_actions: SANDBOX_FORBIDDEN_ACTIONS,
+      approval: { required: true },
+    },
+  };
+}

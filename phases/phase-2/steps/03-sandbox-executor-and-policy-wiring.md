@@ -1,6 +1,6 @@
 # Step 03 — `SandboxExecutor` + policy wiring for Mode B
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 2`, §1.1, §11.2
 **Produces:** infra (`src/core/policy/executors/sandbox/`)
 **Depends on:** 02

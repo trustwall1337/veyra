@@ -7,7 +7,10 @@ import type {
 } from '../../../types/validation-policy.js';
 
 export class ExecutorError extends Error {
-  override readonly name = 'ExecutorError';
+  // Step 2.03: widened to `string` so subclasses (NotImplementedError,
+  // executor-side policy wrappers) can carry their own name without
+  // colliding with the base's literal narrowing.
+  override readonly name: string = 'ExecutorError';
 }
 
 export interface ExecutionReceipt {
