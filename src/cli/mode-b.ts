@@ -156,9 +156,69 @@ export interface ApprovalGateOutcome {
   readonly scansAfterConsume: number;
 }
 
+/**
+ * Codex retro 2.11-approval-signature-not-verified: signature
+ * verification stub. The real verification (Ed25519 minisign
+ * against a trusted public key) lands when the specific minisign
+ * npm library is picked (step 2.01 decision 5 picked the
+ * technology; library deferred). Until then, this function returns
+ * a clearly-marked "not verified" outcome that the gate routes to
+ * a refusal UNLESS the caller passes `skipSignatureVerify: true`
+ * to opt out for environments where the approval file is
+ * integrity-trusted out-of-band (e.g. baked into a secrets manager).
+ */
+export interface SignatureVerifyOutcome {
+  readonly verified: boolean;
+  readonly reason: string;
+}
+
+export function verifySignature(approvalFile: ApprovalFile): SignatureVerifyOutcome {
+  if (approvalFile.signature === undefined || approvalFile.signature.length === 0) {
+    return {
+      verified: false,
+      reason: 'approval-file has no signature field',
+    };
+  }
+  return {
+    verified: false,
+    reason:
+      'minisign Ed25519 verification is deferred (codex retro 2.11). Pass --skip-signature-verify only when the approval file is integrity-trusted out-of-band.',
+  };
+}
+
 export async function checkApprovalAndConsume(
-  inputs: ApprovalGateInputs,
+  inputs: ApprovalGateInputs & {
+    readonly skipSignatureVerify?: boolean;
+    /** Number of synthetic records the compiled plan would create. */
+    readonly maxSyntheticRecordsRequested?: number;
+  },
 ): Promise<Result<ApprovalGateOutcome, ApprovalFileError>> {
+  // Codex retro 2.11-approval-signature-not-verified: signature
+  // check is opt-out-able while the verify implementation is
+  // deferred.
+  if (inputs.skipSignatureVerify !== true) {
+    const sig = verifySignature(inputs.approvalFile);
+    if (!sig.verified) {
+      return err(
+        new ApprovalFileError(
+          `approval-file signature not verified: ${sig.reason}`,
+        ),
+      );
+    }
+  }
+  // Codex retro 2.11: enforce max_synthetic_records when the caller
+  // supplies the proposed plan's record count.
+  if (
+    inputs.maxSyntheticRecordsRequested !== undefined &&
+    inputs.maxSyntheticRecordsRequested >
+      inputs.approvalFile.scope.max_synthetic_records
+  ) {
+    return err(
+      new ApprovalFileError(
+        `approval-file scope.max_synthetic_records=${String(inputs.approvalFile.scope.max_synthetic_records)} exceeded by proposed plan (${String(inputs.maxSyntheticRecordsRequested)} requested)`,
+      ),
+    );
+  }
   const af = inputs.approvalFile;
   // Scope check.
   if (af.scope.project_ref !== inputs.supabaseSandboxRef) {

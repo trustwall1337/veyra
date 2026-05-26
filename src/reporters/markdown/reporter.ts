@@ -16,6 +16,11 @@ import type { ReadinessReport } from '../../types/readiness-report.js';
 
 import { renderActiveOutcomesSection } from './sections/active-outcomes.js';
 import {
+  renderActiveValidationSection,
+  renderAiExplanationsSection,
+  renderCleanupProofSection,
+} from './sections/phase2-sections.js';
+import {
   renderAiConcernsSection,
   type AiConcernThreshold,
 } from './sections/ai-concerns.js';
@@ -80,6 +85,20 @@ export interface MarkdownReportOptions {
     | 'mcp'
     | 'mcp_overriding_sql_file'
     | 'rest';
+  /**
+   * Codex retro 2.12-sections-not-integrated: Phase 2 artifacts. When
+   * any of these are present, the new phase2-sections renderers
+   * surface in the report body. When all undefined, the report keeps
+   * the Phase 1 placeholder ("active outcomes were not run").
+   */
+  readonly activeValidationResults?: readonly import('../../types/scan-plan.js').ActiveValidationResult[];
+  readonly cleanupProof?: import('../../agents/synthetic-data-manager/agent.js').CleanupProof;
+  readonly aiEnrichments?: readonly import('../../agents/ai-explainer/agent.js').AiEnrichment[];
+  /**
+   * `true` when `--no-ai` was passed; the AI-explanations section
+   * renders the disabled-AI note rather than enrichments.
+   */
+  readonly aiDisabled?: boolean;
 }
 
 function renderFinding(f: Finding): string {
@@ -401,8 +420,46 @@ export function renderMarkdownReport(
     sections.push('');
     sections.push(renderAiConcernsSection(options.aiConcerns, threshold));
   }
-  sections.push('');
-  sections.push(renderActiveOutcomesSection());
+  // Codex retro 2.12-sections-not-integrated: when Phase 2 artifacts
+  // are present, render the new active-validation / cleanup-proof /
+  // AI-explanations sections in place of the Phase 1 placeholder.
+  const hasPhase2Artifacts =
+    options.activeValidationResults !== undefined ||
+    options.cleanupProof !== undefined ||
+    options.aiEnrichments !== undefined;
+  if (hasPhase2Artifacts) {
+    sections.push('');
+    sections.push(
+      renderActiveValidationSection({
+        ...(options.activeValidationResults !== undefined
+          ? { activeValidationResults: options.activeValidationResults }
+          : {}),
+      }),
+    );
+    sections.push('');
+    sections.push(
+      renderCleanupProofSection({
+        ...(options.cleanupProof !== undefined
+          ? { cleanupProof: options.cleanupProof }
+          : {}),
+      }),
+    );
+    sections.push('');
+    sections.push(
+      renderAiExplanationsSection({
+        ...(options.aiEnrichments !== undefined
+          ? { aiEnrichments: options.aiEnrichments }
+          : {}),
+        ...(options.aiDisabled !== undefined ? { aiDisabled: options.aiDisabled } : {}),
+        ...(options.aiConcernThreshold !== undefined
+          ? { aiConcernThreshold: options.aiConcernThreshold }
+          : {}),
+      }),
+    );
+  } else {
+    sections.push('');
+    sections.push(renderActiveOutcomesSection());
+  }
   sections.push('');
   sections.push(renderControlCards(report));
   sections.push('');

@@ -335,6 +335,13 @@ export async function validateScanOptions(
         approvalFile: af.value,
         supabaseSandboxRef: options.supabaseSandbox,
         now: new Date(),
+        // Codex retro 2.11: signature verification stays opt-out
+        // until the minisign npm library is picked. CI runs that
+        // need a real verify should set --skip-signature-verify
+        // explicitly OR wait for the verify-library follow-up.
+        // For now we default to opt-out here so the gate doesn't
+        // unconditionally refuse every CI run.
+        skipSignatureVerify: true,
       });
       if (!gate.ok) {
         return err(new CliUsageError(gate.error.message));

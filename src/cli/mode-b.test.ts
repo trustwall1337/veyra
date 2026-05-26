@@ -122,6 +122,7 @@ describe('checkApprovalAndConsume (scope + expiry + counter)', () => {
       approvalFile: af.value,
       supabaseSandboxRef: 'differentprojref01',
       now: new Date('2026-05-26T01:00:00Z'),
+      skipSignatureVerify: true,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.message).toContain('does not match');
@@ -137,6 +138,7 @@ describe('checkApprovalAndConsume (scope + expiry + counter)', () => {
       approvalFile: af.value,
       supabaseSandboxRef: 'sbref01234567890a',
       now: new Date('2027-01-01T00:00:00Z'), // after expires_at
+      skipSignatureVerify: true,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.message).toContain('expired');
@@ -154,6 +156,7 @@ describe('checkApprovalAndConsume (scope + expiry + counter)', () => {
       approvalFile: af.value,
       supabaseSandboxRef: 'sbref01234567890a',
       now: new Date('2026-05-26T01:00:00Z'),
+      skipSignatureVerify: true,
     });
     expect(r1.ok).toBe(true);
     if (r1.ok) expect(r1.value.scansAfterConsume).toBe(1);
@@ -164,6 +167,7 @@ describe('checkApprovalAndConsume (scope + expiry + counter)', () => {
       approvalFile: af.value,
       supabaseSandboxRef: 'sbref01234567890a',
       now: new Date('2026-05-26T02:00:00Z'),
+      skipSignatureVerify: true,
     });
     expect(r2.ok).toBe(true);
     if (r2.ok) expect(r2.value.scansAfterConsume).toBe(2);
@@ -187,6 +191,7 @@ describe('checkApprovalAndConsume (scope + expiry + counter)', () => {
       approvalFile: af.value,
       supabaseSandboxRef: 'sbref01234567890a',
       now: new Date('2026-05-26T01:00:00Z'),
+      skipSignatureVerify: true,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.message).toContain('max_scans reached');
