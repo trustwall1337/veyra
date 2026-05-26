@@ -46,13 +46,76 @@ export interface ParsedSchema {
   readonly unparseable: readonly UnparseableBlock[];
 }
 
-export interface SupabaseRlsInput {
+/**
+ * Step 24: schema source discriminator. The agent's predicates run
+ * the same regardless of source; only the upstream read changes.
+ *
+ *  - `sql_file`: parse a local `schema.sql` exported via `supabase db dump`.
+ *  - `mcp`: drive `list_tables` + `get_advisors` + storage bucket calls
+ *    via a `SupabaseClient` that already enforces `read_only=true +
+ *    project_ref` at its policy gate.
+ *
+ * When both flags reach the CLI, the registration branch hands the
+ * MCP shape here and the report's Sources section names the override
+ * decision in allowed-claims language (per CLAUDE.md §Output language).
+ */
+export interface SupabaseRlsSqlFileSource {
+  readonly source: 'sql_file';
   /** Absolute path to the schema SQL exported via supabase db dump. */
   readonly schemaSqlPath: string;
+}
+
+export interface SupabaseRlsMcpSource {
+  readonly source: 'mcp';
+  /**
+   * Already-constructed Supabase MCP client. The CLI builds this from
+   * `--supabase-mcp <project_ref>` + `SUPABASE_ACCESS_TOKEN` + the
+   * active `ValidationPolicy`. The connector's policy gate enforces
+   * `read_only=true + project_ref` per call; the agent does NOT
+   * weaken that gate.
+   */
+  readonly client: import('../../connectors/supabase/client.js').SupabaseClient;
+  /**
+   * Project ref passed only for diagnostics / `args_fingerprint_sha256`
+   * derivation in the ScanFacts the agent emits. The token never
+   * appears here.
+   */
+  readonly projectRef: string;
+}
+
+/**
+ * Step 27: REST-backed Supabase data source. The customer-default
+ * path in Phase 1 after step 27. Reads tables + storage metadata via
+ * the Supabase Management REST API — no subprocess, no `npx` spawn.
+ *
+ * RLS policy expressions (USING / WITH CHECK) are NOT exposed via
+ * REST; `database.fetchPolicies()` returns `capability_not_exposed`.
+ * The agent emits a `coverage_gap` finding rather than silently
+ * missing policy-level checks; cc-11-6 / cc-11-9 (policy-body checks)
+ * surface as coverage_gap when the REST path is in use.
+ */
+export interface SupabaseRlsRestSource {
+  readonly source: 'rest';
+  readonly database: import('../../types/data-sources.js').DatabaseMetadataSource;
+  readonly storage?: import('../../types/data-sources.js').StorageMetadataSource;
+  /** project_ref for diagnostics / args_fingerprint_sha256. */
+  readonly projectRef: string;
+}
+
+export type SupabaseRlsSchemaSource =
+  | SupabaseRlsSqlFileSource
+  | SupabaseRlsMcpSource
+  | SupabaseRlsRestSource;
+
+export interface SupabaseRlsInput {
+  /** Schema source: a local SQL dump or a live MCP client. */
+  readonly schemaSource: SupabaseRlsSchemaSource;
   /**
    * Optional path to the storage-buckets.json artifact (from step 16's
    * Supabase MCP connector). When absent, bucket findings become
-   * coverage_gap.
+   * coverage_gap (or, in the `mcp` source path, the agent calls
+   * `client.listStorageBuckets()` + `client.getStorageConfig()` and
+   * builds the same fact shape from the MCP response).
    */
   readonly storageBucketsArtifactPath?: string;
   /**

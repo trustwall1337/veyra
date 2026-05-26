@@ -182,9 +182,14 @@ enables mutation.
   Never call a Supabase MCP tool that mutates data, runs migrations, or
   queries user rows.
 - **Supabase storage bucket state** is not in `schema.sql` (Supabase `db dump`
-  excludes managed schemas including `storage`). Bucket public/private state
-  comes from MCP (`list_storage_buckets` + `get_storage_config`) only. Without
-  MCP, bucket findings are `coverage_gap`, not silent absence.
+  excludes managed schemas including `storage`). Storage bucket state comes
+  from a `StorageMetadataSource` (REST or MCP), gated by
+  `ValidationPolicy.allowed_actions.has('read_storage_metadata')`. The
+  `schema.sql` / pg_dump path still excludes it; the REST path supersedes
+  the earlier "MCP only" wording (step 27 amendment). Whichever backend is
+  registered, the policy gate is the authority. Without any
+  `StorageMetadataSource`, bucket findings are `coverage_gap`, not silent
+  absence.
 - **`execute_sql` is denied in Phase 1** even under `read_only=true`. Per
   `PHASE_1_PLAN.md` §4.4: do not query user data. Read schema shape via
   `list_tables` + `get_advisors` instead.

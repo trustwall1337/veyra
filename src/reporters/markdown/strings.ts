@@ -52,6 +52,20 @@ export const STRINGS = {
     'AI was disabled for this scan; AIConcerns not produced.',
   SOURCES_AI_USAGE_PREFIX: 'AI usage:',
 
+  // Step 24: schema-source note in the Sources section. The deterministic
+  // baseline reads Supabase schema from either a local `schema.sql`
+  // dump (`--supabase-schema <path>`) or a live MCP project_ref
+  // (`--supabase-mcp <ref>`). When both flags are supplied, MCP wins
+  // and the note names the override decision.
+  SOURCES_SCHEMA_SOURCE_SQL_FILE:
+    'Supabase schema source: local SQL file. Tables and policies were checked against the dumped schema.',
+  SOURCES_SCHEMA_SOURCE_MCP:
+    'Supabase schema source: live MCP project_ref. Tables and policies were checked against read-only MCP calls (read_only=true + project_ref enforced per call).',
+  SOURCES_SCHEMA_SOURCE_MCP_OVERRIDING_SQL_FILE:
+    'Supabase schema source: live MCP project_ref (overriding the local SQL file). Both flags were supplied; the MCP read takes precedence per the step-24 conflict rule.',
+  SOURCES_SCHEMA_SOURCE_REST:
+    'Supabase schema source: Supabase Management REST API. Tables and storage configuration were checked against the documented v1 endpoints (database/openapi, storage/buckets, config/storage). RLS policy expressions are not exposed via REST; policy-level findings need human review.',
+
   MCP_DECLARED_NOT_VERIFIED:
     '(declared via MCP — not verified at runtime)',
   ACTIVE_VALIDATION_NOT_RUN:

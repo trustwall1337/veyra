@@ -26,15 +26,43 @@ import { businessLogicAgent } from '../agents/business-logic/index.js';
 import { evidenceReportAgent } from '../agents/evidence-report/index.js';
 import { productUnderstandingAgent } from '../agents/product-understanding/index.js';
 import { createSupabaseRlsAgent } from '../agents/supabase-rls/index.js';
+import type { SupabaseRlsSchemaSource } from '../agents/supabase-rls/types.js';
 import { toolRunnerAgent } from '../agents/tool-runner/index.js';
+import type { SupabaseClient } from '../connectors/supabase/client.js';
 import type { GitleaksRunner } from '../scanners/gitleaks/types.js';
 import type { OsvRunner } from '../scanners/osv/types.js';
 import type { SemgrepRunner } from '../scanners/semgrep/types.js';
 import { type ScanOrchestrator } from '../core/orchestrator/scan-orchestrator.js';
 import type { AgentExecutionContext, AgentResult } from '../types/agent.js';
+import type {
+  DatabaseMetadataSource,
+  StorageMetadataSource,
+} from '../types/data-sources.js';
 
 export interface RegistrationOptions {
   readonly supabaseSchemaSqlPath?: string;
+  /**
+   * Step 24: when set, the CLI has constructed a Supabase MCP client
+   * from `--supabase-mcp <project_ref>` + `SUPABASE_ACCESS_TOKEN` +
+   * the active ValidationPolicy. supabase-rls registers and drives
+   * its read-only allowlisted tool calls through this client. If both
+   * `supabaseSchemaSqlPath` and `supabaseMcpClient` are present, MCP
+   * wins (per step 24 §"Conflict handling"); the report's Sources
+   * section names the override in allowed-claims wording.
+   */
+  readonly supabaseMcpClient?: SupabaseClient;
+  readonly supabaseMcpProjectRef?: string;
+  /**
+   * Step 27: REST-backed Supabase data sources. When set, the
+   * supabase-rls agent reads tables via `database.fetchTables()` and
+   * the storage-bucket predicate reads via `storage.fetchBuckets()`.
+   * `supabaseRestProjectRef` flows into the `args_fingerprint_sha256`
+   * hash on every ScanFact the agent emits — the token never appears
+   * here.
+   */
+  readonly supabaseRestDatabase?: DatabaseMetadataSource;
+  readonly supabaseRestStorage?: StorageMetadataSource;
+  readonly supabaseRestProjectRef?: string;
   readonly storageBucketsArtifactPath?: string;
   readonly lockfilePath?: string;
   readonly rulesPath?: string;
@@ -102,14 +130,40 @@ export function registerPhase1Agents(
   }));
 
   // 3. supabase-rls (Layer 4 Pass-1 predicate, schema-driven).
-  //    Registered only when a schema path is provided; otherwise the
-  //    schema-facts predicates have no input and the agent would
-  //    fail to read it.
-  if (options.supabaseSchemaSqlPath !== undefined) {
-    const supabaseSchemaSqlPath = options.supabaseSchemaSqlPath;
+  //    Registered when EITHER a REST data source OR a local schema
+  //    file OR an MCP client is available. Step 27 precedence: REST
+  //    customer-default → MCP dev-gated alternative → SQL file
+  //    dev-only. When MCP and SQL file are both set, MCP wins per
+  //    step 24 §"Conflict handling".
+  const schemaSource: SupabaseRlsSchemaSource | undefined =
+    options.supabaseRestDatabase !== undefined &&
+    options.supabaseRestProjectRef !== undefined
+      ? {
+          source: 'rest',
+          database: options.supabaseRestDatabase,
+          ...(options.supabaseRestStorage !== undefined
+            ? { storage: options.supabaseRestStorage }
+            : {}),
+          projectRef: options.supabaseRestProjectRef,
+        }
+      : options.supabaseMcpClient !== undefined &&
+          options.supabaseMcpProjectRef !== undefined
+        ? {
+            source: 'mcp',
+            client: options.supabaseMcpClient,
+            projectRef: options.supabaseMcpProjectRef,
+          }
+        : options.supabaseSchemaSqlPath !== undefined
+          ? {
+              source: 'sql_file',
+              schemaSqlPath: options.supabaseSchemaSqlPath,
+            }
+          : undefined;
+  if (schemaSource !== undefined) {
     const storageBucketsArtifactPath = options.storageBucketsArtifactPath;
+    const resolvedSource = schemaSource;
     orch.register(createSupabaseRlsAgent(), (context: AgentExecutionContext) => ({
-      schemaSqlPath: supabaseSchemaSqlPath,
+      schemaSource: resolvedSource,
       ...(storageBucketsArtifactPath !== undefined
         ? { storageBucketsArtifactPath }
         : {}),

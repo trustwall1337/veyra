@@ -83,6 +83,27 @@ beforeAll(async () => {
   reportMdPath = path.join(scanWorkdir, 'report.md');
   await copyTree(FIXTURE_SRC, projectRoot);
 
+  // Step 26 Piece 3 + retro-f2: seed `.veyra/scans/<old>/` and
+  // `supabase/.temp/cli-latest` into the project copy BEFORE the
+  // orchestrator runs. The Bootstrap Inventory's file_map must
+  // exclude both. Without seeding here, the orchestrator would
+  // create `.veyra/scans/<new>/` during its own run AFTER the
+  // inventory phase, so the exclusion gate wouldn't be exercised.
+  await fs.mkdir(path.join(projectRoot, '.veyra', 'scans', 'old'), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(projectRoot, '.veyra', 'scans', 'old', 'scan-trace.json'),
+    '{}',
+  );
+  await fs.mkdir(path.join(projectRoot, 'supabase', '.temp'), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(projectRoot, 'supabase', '.temp', 'cli-latest'),
+    '',
+  );
+
   // Retro-f2: force scanner absence by replacing PATH with a known-empty
   // directory. Subprocesses spawned by the scanner adapters (gitleaks,
   // osv, semgrep) cannot find their binaries; the tool-runner takes the
@@ -132,7 +153,10 @@ describe('step 22 end-to-end fixture gate', () => {
     // calls it internally). `--no-ai` is set via `ai: false`.
     const opts: ScanOptions = {
       project: projectRoot,
-      supabaseSchema: schemaPath,
+      // Step 27: legacy --supabase-schema is gated behind VEYRA_DEV=1
+      // as --dev-supabase-schema. Customer scans use --supabase
+      // <project_ref> (REST). Fixture gates remain on the dev path.
+      devSupabaseSchema: schemaPath,
       out: reportMdPath,
       failOnBlocker: false,
       mode: 'read_only_evidence',
@@ -144,7 +168,7 @@ describe('step 22 end-to-end fixture gate', () => {
     const deps: ScanCommandDeps = {
       ...baseDeps,
       logger: silentLogger(),
-      envReader: () => undefined, // retro-f3: no ANTHROPIC_API_KEY visible
+      envReader: (name) => (name === 'VEYRA_DEV' ? '1' : undefined),
       now: () => new Date('2026-05-25T12:00:00Z'),
       random: () => 'e2e22test',
     };
@@ -308,6 +332,24 @@ describe('step 22 end-to-end fixture gate', () => {
       expect(reportMd.toLowerCase()).not.toMatch(new RegExp(`\\b${banned}\\b`));
     }
   });
+
+  it('step 26 Piece 3 (retro-f2): inventory-bootstrap.json file_map excludes .veyra/ and supabase/.temp/ even when those dirs were seeded under projectRoot', async () => {
+    interface InventoryShape {
+      readonly observed_evidence: {
+        readonly file_map: readonly string[];
+      };
+    }
+    const inventoryPath = path.join(artifactDir, 'inventory-bootstrap.json');
+    const inv = await readJson<InventoryShape>(inventoryPath);
+    expect(
+      inv.observed_evidence.file_map.some((p) => p.startsWith('.veyra/')),
+      'inventory.file_map must not contain .veyra/ entries',
+    ).toBe(false);
+    expect(
+      inv.observed_evidence.file_map.some((p) => p.startsWith('supabase/.temp/')),
+      'inventory.file_map must not contain supabase/.temp/ entries',
+    ).toBe(false);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────
@@ -438,7 +480,7 @@ describe('step 23 detection-correctness fixture gate', () => {
 
     const opts: ScanOptions = {
       project: projectRoot23,
-      supabaseSchema: schemaPath23,
+      devSupabaseSchema: schemaPath23,
       out: reportMdPath23,
       failOnBlocker: false,
       mode: 'read_only_evidence',
@@ -450,7 +492,7 @@ describe('step 23 detection-correctness fixture gate', () => {
     const deps: ScanCommandDeps = {
       ...baseDeps,
       logger: silentLogger(),
-      envReader: () => undefined,
+      envReader: (name) => (name === 'VEYRA_DEV' ? '1' : undefined),
       now: () => new Date('2026-05-25T12:00:00Z'),
       random: () => 'step23test',
       scannerRunnersOverride: {
@@ -705,6 +747,253 @@ describe('step 23 detection-correctness fixture gate', () => {
         findingsBody.toLowerCase().includes(token),
         `must_not_surface anchor "${entry.anchor}" matched in findings region`,
       ).toBe(false);
+    }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────
+// Step 24 — Supabase MCP source path
+// ───────────────────────────────────────────────────────────────────
+//
+// Drives the supabase-rls agent's MCP branch end-to-end via an
+// injected mock transport that replays recorded Supabase MCP
+// responses from `examples/.../mcp-fixtures/`. Asserts:
+//
+//   1. `scan-trace.json` includes `agent_id: 'supabase-rls'` with
+//      `status: 'ok'` — the registration branch fires.
+//   2. `supabase-tables.json` is written.
+//   3. `scan-facts.json` contains schema_element facts whose
+//      `source.parser_id` matches the MCP ParserId minted via
+//      `asParserId('supabase-mcp')` (per codex retro-f2).
+//   4. cc-11-5 / cc-11-6 / cc-11-9 / cc-11-12 each have a finding
+//      attributable to MCP facts (not coverage_gap).
+//   5. Every recorded MCP transport call carries `read_only=true` +
+//      `project_ref` — the connector policy gate from retro-16 is
+//      not bypassed.
+//   6. No call to `execute_sql` or any other denied tool.
+//   7. The rendered report's Sources section names the MCP source.
+describe('step 24 Supabase MCP source path', () => {
+  let workdir24: string;
+  let projectRoot24: string;
+  let reportMdPath24: string;
+  let scanId24: string;
+  let artifactDir24: string;
+  let reportMd24: string;
+  let recordedRequests: { name: string; args: Readonly<Record<string, unknown>> }[];
+
+  beforeAll(async () => {
+    workdir24 = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'veyra-e2e-fixture-step24-'),
+    );
+    projectRoot24 = path.join(workdir24, 'fixture');
+    reportMdPath24 = path.join(workdir24, 'report.md');
+    await copyTree(FIXTURE_SRC, projectRoot24);
+
+    recordedRequests = [];
+
+    // Load the recorded fixtures.
+    const listTablesFixture = JSON.parse(
+      await fs.readFile(
+        path.join(FIXTURE_SRC, 'mcp-fixtures', 'supabase-list-tables.json'),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    const getAdvisorsFixture = JSON.parse(
+      await fs.readFile(
+        path.join(FIXTURE_SRC, 'mcp-fixtures', 'supabase-get-advisors.json'),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    const bucketsFixture = JSON.parse(
+      await fs.readFile(
+        path.join(FIXTURE_SRC, 'mcp-fixtures', 'supabase-storage-buckets.json'),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+
+    const mockTransport = {
+      async invokeTool(
+        name: string,
+        args: Readonly<Record<string, unknown>>,
+      ): Promise<unknown> {
+        recordedRequests.push({ name, args });
+        switch (name) {
+          case 'list_tables':
+            return listTablesFixture;
+          case 'get_advisors':
+            return getAdvisorsFixture;
+          case 'list_storage_buckets':
+            return bucketsFixture;
+          case 'get_storage_config':
+            return {};
+          default:
+            throw new Error(`unexpected MCP tool: ${name}`);
+        }
+      },
+    };
+
+    const opts: ScanOptions = {
+      project: projectRoot24,
+      // Step 27: legacy --supabase-mcp customer flag is removed; the
+      // MCP backend is reached via --supabase <ref> + VEYRA_DEV=1 +
+      // --dev-supabase-backend supabase-mcp. The mock transport
+      // injection still works through deps.supabaseTransportFactory.
+      supabase: 'fakeprojectref01',
+      devSupabaseBackend: 'supabase-mcp',
+      out: reportMdPath24,
+      failOnBlocker: false,
+      mode: 'read_only_evidence',
+      env: 'local',
+      lovableMcp: false,
+      ai: false,
+    };
+    const baseDeps = defaultScanCommandDeps();
+    const deps: ScanCommandDeps = {
+      ...baseDeps,
+      logger: silentLogger(),
+      envReader: (name) => {
+        if (name === 'SUPABASE_ACCESS_TOKEN') return 'fake-token-test';
+        if (name === 'VEYRA_DEV') return '1';
+        return undefined;
+      },
+      now: () => new Date('2026-05-25T12:00:00Z'),
+      random: () => 'step24test',
+      supabaseTransportFactory: () => mockTransport,
+    };
+    const r = await runScan(opts, deps);
+    expect(isOk(r)).toBe(true);
+
+    const scansDir = path.join(projectRoot24, '.veyra', 'scans');
+    const entries = await fs.readdir(scansDir);
+    expect(entries.length).toBeGreaterThan(0);
+    scanId24 = entries[0]!;
+    artifactDir24 = path.join(scansDir, scanId24);
+    reportMd24 = await fs.readFile(reportMdPath24, 'utf8');
+  }, 60_000);
+
+  afterAll(async () => {
+    try {
+      await fs.rm(workdir24, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it('supabase-rls registers and reports status:ok in scan-trace.json', async () => {
+    interface TraceEntry {
+      readonly agent_id: string;
+      readonly status: string;
+    }
+    interface TraceShape {
+      readonly trace: readonly TraceEntry[];
+    }
+    const trace = await readJson<TraceShape>(
+      path.join(artifactDir24, 'scan-trace.json'),
+    );
+    const rls = trace.trace.find((t) => t.agent_id === 'supabase-rls');
+    expect(rls).toBeDefined();
+    expect(rls?.status).toBe('ok');
+  });
+
+  it('supabase-tables.json is written', async () => {
+    const supabaseTablesPath = path.join(artifactDir24, 'supabase-tables.json');
+    const stat = await fs.stat(supabaseTablesPath);
+    expect(stat.isFile()).toBe(true);
+  });
+
+  it('supabase-tables.json contains the MCP-sourced tables (provenance of MCP read)', async () => {
+    // Pre-step-23 retro-f1: supabase-rls schema facts are built in
+    // memory and consumed by the predicates; they are NOT persisted
+    // to scan-facts.json (that's tool-runner's artifact). The
+    // user-visible artifact for "what schema did the agent see" is
+    // `supabase-tables.json`. Step 24 asserts the MCP-driven path
+    // populates the same artifact with the MCP-returned table list,
+    // so the upstream-of-predicate evidence is observable.
+    interface TablesArtifact {
+      readonly tables: readonly { schema: string; name: string; rls_enabled: boolean }[];
+    }
+    const tables = await readJson<TablesArtifact>(
+      path.join(artifactDir24, 'supabase-tables.json'),
+    );
+    expect(tables.tables.length).toBeGreaterThan(0);
+    // The MCP fixture seeds public.users with rls_enabled: false.
+    const usersTable = tables.tables.find(
+      (t) => t.schema === 'public' && t.name === 'users',
+    );
+    expect(usersTable).toBeDefined();
+    expect(usersTable?.rls_enabled).toBe(false);
+  });
+
+  it('cc-11-5 / cc-11-6 / cc-11-9 / cc-11-12 each surface findings from MCP-sourced facts (codex step24-f4)', async () => {
+    interface FindingShape {
+      readonly control_id: string;
+      readonly finding_type: string;
+    }
+    interface CardShape {
+      readonly control_id: string;
+      readonly findings: readonly FindingShape[];
+    }
+    interface ReportShape {
+      readonly control_cards: readonly CardShape[];
+    }
+    const report = await readJson<ReportShape>(
+      path.join(artifactDir24, 'readiness-report.json'),
+    );
+    // cc-11-12 included per codex step24-f4: the MCP branch calls
+    // listStorageBuckets + getStorageConfig and the fixture's
+    // `user-uploads` bucket is public + anon SELECT, so cc-11-12
+    // fires from MCP-sourced bucket facts rather than coverage_gap.
+    for (const ctrl of ['cc-11-5', 'cc-11-6', 'cc-11-9', 'cc-11-12']) {
+      const card = report.control_cards.find((c) => c.control_id === ctrl);
+      const nonGap = card?.findings.find((f) => f.finding_type !== 'coverage_gap');
+      expect(
+        nonGap,
+        `${ctrl} should have a non-coverage_gap finding from MCP facts`,
+      ).toBeDefined();
+    }
+  });
+
+  it('every recorded MCP request carries read_only=true + project_ref', () => {
+    expect(recordedRequests.length).toBeGreaterThan(0);
+    for (const req of recordedRequests) {
+      expect(req.args.read_only, `tool "${req.name}" missing read_only=true`).toBe(true);
+      expect(req.args.project_ref, `tool "${req.name}" missing project_ref`).toBe(
+        'fakeprojectref01',
+      );
+    }
+  });
+
+  it('every recorded MCP tool name is a subset of the Phase 1 Supabase allowlist (codex step24-f4)', () => {
+    // Tighter than "not in the denied set": every recorded tool must
+    // be in the Phase 1 allowlist explicitly. A future tool addition
+    // outside the allowlist (e.g. some new MCP read tool the
+    // connector accidentally permits) would fail closed here.
+    const allowedTools = new Set([
+      'list_tables',
+      'list_extensions',
+      'list_migrations',
+      'get_advisors',
+      'get_logs',
+      'list_edge_functions',
+      'get_edge_function',
+      'list_storage_buckets',
+      'get_storage_config',
+    ]);
+    for (const req of recordedRequests) {
+      expect(
+        allowedTools.has(req.name),
+        `tool "${req.name}" is not in the Phase 1 Supabase MCP allowlist`,
+      ).toBe(true);
+    }
+  });
+
+  it('rendered report Sources section names the MCP schema source', () => {
+    expect(reportMd24).toMatch(/Supabase schema source: live MCP/);
+  });
+
+  it('rendered report carries no forbidden vocabulary', () => {
+    for (const banned of ['secure', 'safe', 'compliant']) {
+      expect(reportMd24.toLowerCase()).not.toMatch(new RegExp(`\\b${banned}\\b`));
     }
   });
 });

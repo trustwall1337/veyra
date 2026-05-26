@@ -1,0 +1,4 @@
+{
+  "_note": "Recorded Supabase MCP get_advisors response for the Veyra Phase 1 fixture (step 24). Empty advisor list — the e2e gate calls get_advisors for completeness (it's in the Phase 1 allowlist) but the response does not directly produce ParsedSchema entries. The supabase-rls predicates work entirely off list_tables + storage-buckets.",
+  "advisors": []
+}

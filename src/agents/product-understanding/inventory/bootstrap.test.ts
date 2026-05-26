@@ -378,3 +378,49 @@ describe('integration — vulnerable fixture', () => {
     expect(content['declared_intent']).toBeUndefined();
   });
 });
+
+describe('step 26 Piece 3: file-walk excludes .veyra/ and supabase/.temp/', () => {
+  it('skips Veyra scan output (`.veyra/scans/...`) and Supabase CLI temp metadata (`supabase/.temp/...`)', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'veyra-inv-exclude-'));
+    // Realistic project shape:
+    //   <root>/src/index.ts                        — should appear
+    //   <root>/.veyra/scans/old/scan-trace.json   — must NOT appear
+    //   <root>/supabase/.temp/cli-latest          — must NOT appear
+    //   <root>/supabase/migrations/001_init.sql   — should appear
+    await fs.mkdir(path.join(tmp, 'src'), { recursive: true });
+    await fs.writeFile(path.join(tmp, 'src/index.ts'), 'export const x = 1;');
+    await fs.mkdir(path.join(tmp, '.veyra/scans/old'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmp, '.veyra/scans/old/scan-trace.json'),
+      '{}',
+    );
+    await fs.mkdir(path.join(tmp, 'supabase/.temp'), { recursive: true });
+    await fs.writeFile(path.join(tmp, 'supabase/.temp/cli-latest'), '');
+    await fs.mkdir(path.join(tmp, 'supabase/migrations'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmp, 'supabase/migrations/001_init.sql'),
+      '-- ok',
+    );
+    await fs.writeFile(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({ name: 'test-exclude', version: '0.0.0' }),
+    );
+
+    const r = await buildBootstrapInventory({ projectRoot: tmp });
+    expect(isOk(r)).toBe(true);
+    if (!isOk(r)) return;
+    const fileMap = r.value.observed_evidence.file_map;
+
+    // Excluded paths must NOT appear:
+    expect(fileMap.some((p) => p.startsWith('.veyra/'))).toBe(false);
+    expect(fileMap.some((p) => p.startsWith('supabase/.temp/'))).toBe(false);
+
+    // Adjacent / sibling paths still appear normally:
+    expect(fileMap).toContain(path.join('src', 'index.ts'));
+    expect(fileMap).toContain(
+      path.join('supabase', 'migrations', '001_init.sql'),
+    );
+
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+});

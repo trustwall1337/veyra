@@ -1,0 +1,50 @@
+{
+  "_note": "Recorded Supabase MCP list_tables response for the Veyra Phase 1 fixture (step 24). Mirrors the seeded vulnerabilities in supabase/schema.sql so the MCP-driven e2e gate exercises cc-11-5 (RLS off public.users), cc-11-6 (USING (true) on public.orders), and cc-11-9 (TO authenticated on public.documents). Do not edit by hand; regenerate from the real Supabase MCP server if the response shape changes.",
+  "tables": [
+    {
+      "schema": "public",
+      "name": "users",
+      "rls_enabled": false,
+      "policies": []
+    },
+    {
+      "schema": "public",
+      "name": "orders",
+      "rls_enabled": true,
+      "policies": [
+        {
+          "name": "orders_select_anyone",
+          "command": "SELECT",
+          "roles": "public",
+          "definition": "true"
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "documents",
+      "rls_enabled": true,
+      "policies": [
+        {
+          "name": "documents_select_authed",
+          "command": "SELECT",
+          "roles": "authenticated",
+          "definition": "true"
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "timezones",
+      "rls_enabled": true,
+      "policies": [
+        {
+          "name": "timezones_select_anyone",
+          "command": "SELECT",
+          "roles": "public",
+          "definition": "true"
+        }
+      ]
+    }
+  ]
+}

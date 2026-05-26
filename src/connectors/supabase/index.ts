@@ -11,3 +11,8 @@ export {
   findTool,
   type SupabaseInvocation,
 } from './policy.js';
+export {
+  SupabaseTransportConfigurationError,
+  createDefaultSupabaseTransport,
+  type DefaultSupabaseTransportOptions,
+} from './transport.js';

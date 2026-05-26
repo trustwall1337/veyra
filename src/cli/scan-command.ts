@@ -67,6 +67,29 @@ export const APPROVED_PROD_SAFE_REJECTION_MESSAGE =
   '--mode approved_production_safe: not yet implemented (later phase; see FPP §17 Phase 5)';
 
 /**
+ * Step 27: legacy customer-facing flags are removed from the customer
+ * surface. They reject at parse-time with explicit migration messages
+ * so callers see a clear path forward (not a silent no-op). Done-When
+ * #5 + #6 + the dev-flag double-gate.
+ */
+export const SUPABASE_MCP_DEPRECATED_MESSAGE =
+  '--supabase-mcp is deprecated. Use --supabase <project_ref> for the REST default. For the MCP backend (alternative), set VEYRA_DEV=1 and use --dev-supabase-backend supabase-mcp.';
+export const LOVABLE_MCP_DEFERRED_MESSAGE =
+  '--lovable-mcp requires a Lovable OAuth client; this is deferred to Phase 1 step 28. For Lovable in Phase 1, read code from a local git clone of your Lovable project\'s GitHub repo.';
+export const SUPABASE_SCHEMA_DEPRECATED_MESSAGE =
+  '--supabase-schema is a developer-only flag now. Set VEYRA_DEV=1 and pass --dev-supabase-schema <path> instead. Customer scans use --supabase <project_ref> (the REST default).';
+export const DEV_FLAG_GATE_MESSAGE_PREFIX =
+  'developer-only flag requires VEYRA_DEV=1 in the environment:';
+
+/**
+ * Allowed customer-facing data-source backend ids. The customer flag
+ * `--supabase <ref>` resolves to `supabase-rest`. Dev flag
+ * `--dev-supabase-backend <id>` accepts any registered id but the
+ * customer-default remains REST.
+ */
+export const CUSTOMER_DEFAULT_SUPABASE_BACKEND = 'supabase-rest';
+
+/**
  * Shape of the parsed `scan` argv after commander has applied defaults and
  * negations. `ai` follows commander's `--no-ai` convention: default `true`,
  * `false` when the flag is passed.
@@ -82,6 +105,23 @@ export interface ScanOptions {
   readonly lovableMcp: boolean;
   readonly lovableProject?: string;
   readonly supabaseMcp?: string;
+  /**
+   * Step 27 customer-facing flag: `--supabase <project_ref>`. Selects
+   * the REST backend by default. Reads `SUPABASE_ACCESS_TOKEN` from the
+   * environment via `deps.envReader`.
+   */
+  readonly supabase?: string;
+  /**
+   * Step 27 dev-only flag: `--dev-supabase-backend <id>`. Requires
+   * `VEYRA_DEV=1` (double-gate per Q4). Accepts any registered
+   * `DataSourceId`; common values: `supabase-rest` (default), `supabase-mcp`.
+   */
+  readonly devSupabaseBackend?: string;
+  /**
+   * Step 27 dev-only flag: `--dev-supabase-schema <path>`. Replaces the
+   * legacy customer-facing `--supabase-schema`. Requires `VEYRA_DEV=1`.
+   */
+  readonly devSupabaseSchema?: string;
   readonly ai: boolean;
   readonly aiProvider?: string;
   readonly aiHypothesisBudget?: string;
@@ -101,6 +141,20 @@ export interface ValidatedScanInputs {
   readonly lovableMcp: boolean;
   readonly lovableProject?: string;
   readonly supabaseMcpProjectRef?: string;
+  /**
+   * Step 27: customer-facing `--supabase <project_ref>`. When set, the
+   * CLI builds the REST-backed `DatabaseMetadataSource` +
+   * `StorageMetadataSource` and passes them to agent-registration. The
+   * access token rides only in the Authorization header (CLAUDE.md
+   * §Secrets); the project_ref is the only argv-visible identifier.
+   */
+  readonly supabaseProjectRef?: string;
+  /**
+   * Step 27 dev-only: resolved `--dev-supabase-backend <id>` value when
+   * `VEYRA_DEV=1` is set. Defaults to `undefined` for customer-default
+   * REST. When set, the runScan path uses this id to pick the backend.
+   */
+  readonly devSupabaseBackend?: string;
   /**
    * `true` when `--no-ai` was passed OR when AI was not opted into.
    * `--no-ai` is the hard override: it forces AI off even when a key
@@ -178,6 +232,18 @@ export interface ScanCommandDeps {
     readonly osv?: import('../scanners/osv/types.js').OsvRunner;
     readonly semgrep?: import('../scanners/semgrep/types.js').SemgrepRunner;
   };
+  /**
+   * Step 24: optional Supabase MCP transport factory. Production
+   * callers leave this undefined and `createDefaultSupabaseTransport`
+   * is used (which reads the access-token from the injected
+   * `envReader` and is a fail-closed Phase 1 stub). The end-to-end
+   * fixture gate injects a mock transport that replays recorded
+   * Supabase MCP responses from `examples/.../mcp-fixtures/`.
+   */
+  readonly supabaseTransportFactory?: (options: {
+    readonly projectRef: string;
+    readonly accessToken: string;
+  }) => import('../connectors/supabase/client.js').SupabaseTransport;
 }
 
 /**
@@ -212,10 +278,70 @@ export async function validateScanOptions(
     );
   }
 
-  if (options.lovableMcp && options.lovableProject === undefined) {
+  // Step 27 Done-When #6: --lovable-mcp is removed from the customer
+  // surface. Lovable's MCP server uses OAuth from inside the calling
+  // MCP client only; Veyra has no OAuth client in Phase 1. Reject at
+  // parse-time with the explicit step-28-deferred message.
+  if (options.lovableMcp) {
+    return err(new CliUsageError(LOVABLE_MCP_DEFERRED_MESSAGE));
+  }
+
+  // Step 27 Done-When #5: legacy --supabase-mcp rejects at parse-time
+  // with the migration message. The MCP backend is reachable only via
+  // VEYRA_DEV=1 + --dev-supabase-backend supabase-mcp. No silent
+  // fall-through, no no-op, no "did the flag run?" ambiguity.
+  if (options.supabaseMcp !== undefined) {
+    return err(new CliUsageError(SUPABASE_MCP_DEPRECATED_MESSAGE));
+  }
+
+  // Step 27: legacy customer-facing --supabase-schema is deprecated.
+  // Customers use --supabase <project_ref>; contributors testing
+  // against a local pg_dump use --dev-supabase-schema with VEYRA_DEV=1.
+  if (options.supabaseSchema !== undefined) {
+    return err(new CliUsageError(SUPABASE_SCHEMA_DEPRECATED_MESSAGE));
+  }
+
+  // Step 27 Done-When #8: developer flags require VEYRA_DEV=1 in the
+  // environment AND the --dev- prefix. Two locks together so a single
+  // accidental copy-paste from a contributor's terminal does not
+  // activate them in customer use.
+  const veyraDev = deps.envReader('VEYRA_DEV') === '1';
+  if (options.devSupabaseBackend !== undefined && !veyraDev) {
     return err(
       new CliUsageError(
-        '--lovable-mcp requires --lovable-project <id> (Lovable MCP allowlist denies list_projects; get_project needs an explicit id)',
+        `${DEV_FLAG_GATE_MESSAGE_PREFIX} --dev-supabase-backend (set VEYRA_DEV=1 in the shell)`,
+      ),
+    );
+  }
+  if (options.devSupabaseSchema !== undefined && !veyraDev) {
+    return err(
+      new CliUsageError(
+        `${DEV_FLAG_GATE_MESSAGE_PREFIX} --dev-supabase-schema (set VEYRA_DEV=1 in the shell)`,
+      ),
+    );
+  }
+
+  // --supabase <project_ref>: customer flag. Validate the project_ref
+  // shape before any I/O so a typo surfaces immediately.
+  if (options.supabase !== undefined) {
+    if (!/^[a-z0-9]{16,32}$/.test(options.supabase)) {
+      return err(
+        new CliUsageError(
+          `--supabase project_ref must be 16–32 lowercase alphanumerics; got "${options.supabase}"`,
+        ),
+      );
+    }
+  }
+  // --dev-supabase-backend requires --supabase to identify the project.
+  // Without it, there is no project_ref to point the alternative
+  // backend at.
+  if (
+    options.devSupabaseBackend !== undefined &&
+    options.supabase === undefined
+  ) {
+    return err(
+      new CliUsageError(
+        '--dev-supabase-backend requires --supabase <project_ref> to identify the project',
       ),
     );
   }
@@ -249,20 +375,20 @@ export async function validateScanOptions(
   }
 
   let schemaAbs: string | undefined;
-  if (options.supabaseSchema !== undefined) {
-    const abs = path.resolve(options.supabaseSchema);
+  if (options.devSupabaseSchema !== undefined) {
+    const abs = path.resolve(options.devSupabaseSchema);
     const s = await safeStat(deps.stat, abs);
     if (s === null) {
       return err(
         new CliUsageError(
-          `--supabase-schema "${options.supabaseSchema}" does not exist`,
+          `--dev-supabase-schema "${options.devSupabaseSchema}" does not exist`,
         ),
       );
     }
     if (!s.isFile()) {
       return err(
         new CliUsageError(
-          `--supabase-schema "${options.supabaseSchema}" is not a file`,
+          `--dev-supabase-schema "${options.devSupabaseSchema}" is not a file`,
         ),
       );
     }
@@ -283,8 +409,11 @@ export async function validateScanOptions(
     ...(options.lovableProject !== undefined
       ? { lovableProject: options.lovableProject }
       : {}),
-    ...(options.supabaseMcp !== undefined
-      ? { supabaseMcpProjectRef: options.supabaseMcp }
+    ...(options.supabase !== undefined
+      ? { supabaseProjectRef: options.supabase }
+      : {}),
+    ...(options.devSupabaseBackend !== undefined
+      ? { devSupabaseBackend: options.devSupabaseBackend }
       : {}),
     aiDisabled: ai.aiDisabled,
     aiOptIn: ai.aiOptIn,
@@ -582,9 +711,161 @@ export async function runScan(
   // lockfile under projectRoot so semgrep + OSV adapters get the
   // inputs they need without the customer passing extra flags.
   const discoveredLockfile = await discoverLockfile(inputs.projectRoot);
+
+  // Step 28a codex df1: register the local-clone CodeSource so
+  // resolveDataSource(lovableGithubCloneId) resolves at runtime.
+  // Production code paths can then route through the registry once
+  // step 28b wires the Lovable MCP CodeSource alongside it. The call
+  // is idempotent — the registry rejects double-register, which we
+  // tolerate (each scan invocation gets a fresh check).
+  try {
+    const lgcMod = await import('../data-sources/lovable-github-clone/index.js');
+    lgcMod.registerLovableGithubClone();
+  } catch {
+    // already registered in this process — registry is module-scoped.
+  }
+
+  // Step 27: select Supabase data-source backend.
+  //   - Customer default: --supabase <project_ref> → REST backend.
+  //   - Dev-gated alternative: --supabase <ref> + VEYRA_DEV=1 +
+  //     --dev-supabase-backend supabase-mcp → MCP backend.
+  //   - Dev-gated SQL file: --dev-supabase-schema <path> (parsed by
+  //     supabase-rls's existing sql_file path; no backend wiring).
+  //
+  // The legacy customer-facing --supabase-mcp flag is rejected at
+  // parse-time with SUPABASE_MCP_DEPRECATED_MESSAGE (Done-When #5).
+  let supabaseMcpClient: import('../connectors/supabase/client.js').SupabaseClient | undefined;
+  let supabaseMcpTransport:
+    | import('../connectors/supabase/client.js').SupabaseTransport
+    | undefined;
+  let supabaseRestSources:
+    | {
+        readonly projectRef: string;
+        readonly database: import('../types/data-sources.js').DatabaseMetadataSource;
+        readonly storage: import('../types/data-sources.js').StorageMetadataSource;
+      }
+    | undefined;
+  if (inputs.supabaseProjectRef !== undefined) {
+    const accessToken = deps.envReader('SUPABASE_ACCESS_TOKEN') ?? '';
+    if (accessToken.length === 0) {
+      return {
+        ok: false,
+        error: new CliUsageError(
+          '--supabase requires SUPABASE_ACCESS_TOKEN in the environment. Set the env var and retry; the value never appears on argv or in any artifact per CLAUDE.md §Secrets.',
+        ),
+      };
+    }
+    // Step 27 codex step27-df5: resolve the backend through the
+    // data-source registry rather than hardcoding a `'supabase-rest' |
+    // 'supabase-mcp'` switch (FPP §2A forbids closed unions on service
+    // identity in shared code). Backends register themselves at module
+    // load; the CLI looks up the requested id and constructs the
+    // capability adapters from the registered factories.
+    const backendStr = inputs.devSupabaseBackend ?? CUSTOMER_DEFAULT_SUPABASE_BACKEND;
+    const { asDataSourceId } = await import('../types/data-sources.js');
+    const idR = asDataSourceId(backendStr);
+    if (!idR.ok) {
+      return {
+        ok: false,
+        error: new CliUsageError(
+          `--dev-supabase-backend "${backendStr}" is not a valid DataSourceId: ${idR.error.message}`,
+        ),
+      };
+    }
+    // Lazily ensure backend modules are registered (idempotent —
+    // registry rejects double-register, so wrap in try/catch).
+    const { resolveDataSource } = await import('../data-sources/registry.js');
+    const restMod = await import('../data-sources/supabase-rest/index.js');
+    const mcpMod = await import('../data-sources/supabase-mcp/index.js');
+    try { restMod.registerSupabaseRest(); } catch { /* already registered */ }
+    try { mcpMod.registerSupabaseMcp(); } catch { /* already registered */ }
+
+    const reg = resolveDataSource(idR.value);
+    if (reg === undefined) {
+      return {
+        ok: false,
+        error: new CliUsageError(
+          `--dev-supabase-backend "${backendStr}" is not a registered Supabase data-source backend`,
+        ),
+      };
+    }
+
+    if (reg.id === restMod.supabaseRestId) {
+      // REST default — no subprocess, no MCP protocol overhead.
+      try {
+        const client = restMod.createSupabaseRestClient({
+          projectRef: inputs.supabaseProjectRef,
+          accessToken,
+          policy,
+        });
+        supabaseRestSources = {
+          projectRef: inputs.supabaseProjectRef,
+          database: restMod.createSupabaseRestDatabase(reg.id, client),
+          storage: restMod.createSupabaseRestStorage(reg.id, client),
+        };
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        return {
+          ok: false,
+          error: new CliUsageError(`--supabase setup failed: ${m}`),
+        };
+      }
+    } else if (reg.id === mcpMod.supabaseMcpId) {
+      // Dev-gated MCP alternative backend. The MCP registration's
+      // factories throw — the connector wiring needs a `SupabaseClient`
+      // instance, not just policy + token. Build it here.
+      const supabaseModule = await import('../connectors/supabase/index.js');
+      try {
+        supabaseMcpTransport =
+          deps.supabaseTransportFactory !== undefined
+            ? deps.supabaseTransportFactory({
+                projectRef: inputs.supabaseProjectRef,
+                accessToken,
+              })
+            : supabaseModule.createDefaultSupabaseTransport({
+                projectRef: inputs.supabaseProjectRef,
+                accessToken,
+              });
+        supabaseMcpClient = supabaseModule.createSupabaseClient({
+          transport: supabaseMcpTransport,
+          projectRef: inputs.supabaseProjectRef,
+          policy,
+        });
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        return {
+          ok: false,
+          error: new CliUsageError(
+            `--dev-supabase-backend ${String(reg.id)} setup failed: ${m}`,
+          ),
+        };
+      }
+    } else {
+      return {
+        ok: false,
+        error: new CliUsageError(
+          `--dev-supabase-backend "${backendStr}" is registered but has no Supabase capability wiring (label: ${reg.label})`,
+        ),
+      };
+    }
+  }
+
   registerPhase1Agents(orchestrator, {
     ...(inputs.supabaseSchemaPath !== undefined
       ? { supabaseSchemaSqlPath: inputs.supabaseSchemaPath }
+      : {}),
+    ...(supabaseMcpClient !== undefined && inputs.supabaseProjectRef !== undefined
+      ? {
+          supabaseMcpClient,
+          supabaseMcpProjectRef: inputs.supabaseProjectRef,
+        }
+      : {}),
+    ...(supabaseRestSources !== undefined
+      ? {
+          supabaseRestDatabase: supabaseRestSources.database,
+          supabaseRestStorage: supabaseRestSources.storage,
+          supabaseRestProjectRef: supabaseRestSources.projectRef,
+        }
       : {}),
     rulesPath: bundledRulesDir(),
     ...(discoveredLockfile !== undefined
@@ -686,9 +967,29 @@ export async function runScan(
         }
       }
 
+      // Step 27: schema-source note. Customer-default is REST
+      // (`supabase-rest`); the dev-gated MCP backend and the
+      // SQL-file path still surface with their existing labels.
+      const schemaSourceTag:
+        | 'sql_file'
+        | 'mcp'
+        | 'mcp_overriding_sql_file'
+        | 'rest'
+        | undefined =
+        supabaseRestSources !== undefined
+          ? 'rest'
+          : supabaseMcpClient !== undefined && inputs.supabaseSchemaPath !== undefined
+            ? 'mcp_overriding_sql_file'
+            : supabaseMcpClient !== undefined
+              ? 'mcp'
+              : inputs.supabaseSchemaPath !== undefined
+                ? 'sql_file'
+                : undefined;
+
       const reportOptions: import('../reporters/markdown/index.js').MarkdownReportOptions = {
         ...(declaredContext !== undefined ? { declaredContext } : {}),
         ...(observedEvidence !== undefined ? { observedEvidence } : {}),
+        ...(schemaSourceTag !== undefined ? { schemaSource: schemaSourceTag } : {}),
       };
       await fs.writeFile(
         inputs.outPath,
@@ -711,20 +1012,36 @@ export async function runScan(
     } else {
       throw e;
     }
+  } finally {
+    // Step 25 retro-f2: tear down the Supabase MCP transport at scan
+    // end. The production SDK-backed transport holds a child-process
+    // handle (the spawned `npx @supabase/mcp-server-supabase`); without
+    // this close path, the subprocess can leak past the scan or keep
+    // the parent process alive. Test transports may omit close() —
+    // the field is optional so we null-check before invoking.
+    if (supabaseMcpTransport?.close !== undefined) {
+      try {
+        await supabaseMcpTransport.close();
+      } catch (closeErr) {
+        const m = closeErr instanceof Error ? closeErr.message : String(closeErr);
+        deps.logger.warn(`supabase-mcp transport close failed: ${m}`);
+      }
+    }
   }
 
   return ok({ exitCode });
 }
 
 export function buildScanCommand(deps: ScanCommandDeps): Command {
-  return new Command('scan')
+  const veyraDev = deps.envReader('VEYRA_DEV') === '1';
+  const cmd = new Command('scan')
     .description(
-      'Run launch-readiness checks against a local Lovable + Supabase project. Reports which controls were checked, which evidence was found, which was missing, and which issues appear launch-blocking. Phase 1 implements --mode read_only_evidence only; MCP modes are optional and Lovable PAT auth is not supported. AI is opt-in: the deterministic baseline runs without any AI flag or env var. Opt-in requires BOTH --ai-provider <name> AND the corresponding env var (ANTHROPIC_API_KEY for anthropic; OPENAI_API_KEY is Phase 2 only). --no-ai is the hard override for CI runs that must not call AI even when opted-in elsewhere.',
+      'Run launch-readiness checks against a local Lovable + Supabase project. Reports which controls were checked, which evidence was found, which was missing, and which issues appear launch-blocking. Phase 1 implements --mode read_only_evidence only. Supabase metadata is read via the Management REST API by default (--supabase <project_ref> + SUPABASE_ACCESS_TOKEN env var); the legacy --supabase-mcp flag is deprecated and rejects at parse-time. Lovable code is read from the local filesystem (the customer clones their Lovable GitHub repo first); the --lovable-mcp flag is deferred to step 28 and rejects at parse-time. AI is opt-in: the deterministic baseline runs without any AI flag or env var. Opt-in requires BOTH --ai-provider <name> AND the corresponding env var (ANTHROPIC_API_KEY for anthropic; OPENAI_API_KEY is Phase 2 only). --no-ai is the hard override for CI runs that must not call AI even when opted-in elsewhere.',
     )
     .requiredOption('--project <path>', 'path to the Lovable project root')
     .option(
-      '--supabase-schema <path>',
-      'path to schema SQL exported via supabase db dump',
+      '--supabase <project_ref>',
+      'enable Supabase Management REST API reads for the given project_ref (default backend). Requires SUPABASE_ACCESS_TOKEN in the environment.',
     )
     .option('--out <path>', 'Markdown report output path', 'veyra-report.md')
     .option('--json <path>', 'JSON report output path')
@@ -745,16 +1062,16 @@ export function buildScanCommand(deps: ScanCommandDeps): Command {
     )
     .option(
       '--lovable-mcp',
-      'enable Lovable MCP connector (optional; requires --lovable-project)',
+      'DEPRECATED: rejects at parse-time. Lovable OAuth client is deferred to step 28; for Phase 1, clone the project repo and pass --project <path>.',
       false,
     )
     .option(
       '--lovable-project <id>',
-      'Lovable project id (required with --lovable-mcp; list_projects is denied by the Phase 1 allowlist)',
+      'Lovable project id (paired with --lovable-mcp; both are deprecated as of step 27).',
     )
     .option(
       '--supabase-mcp <project_ref>',
-      'enable Supabase MCP connector with the given project_ref (read_only is derived from --mode)',
+      'DEPRECATED: rejects at parse-time. Use --supabase <project_ref> for REST default; MCP backend is gated behind VEYRA_DEV=1.',
     )
     .option(
       '--no-ai',
@@ -787,6 +1104,40 @@ export function buildScanCommand(deps: ScanCommandDeps): Command {
         throw result.error;
       }
     });
+  if (veyraDev) {
+    // Step 27 Done-When #8: dev-only flags are hidden from the default
+    // --help output. They appear only when VEYRA_DEV=1 is set in the
+    // environment. Customers do not see them; contributors do.
+    cmd
+      .option(
+        '--dev-supabase-backend <id>',
+        'developer-only: select Supabase data-source backend by registry id (default: supabase-rest). Requires --supabase <project_ref> and VEYRA_DEV=1.',
+      )
+      .option(
+        '--dev-supabase-schema <path>',
+        'developer-only: parse a local pg_dump SQL file instead of any remote backend. Requires VEYRA_DEV=1.',
+      );
+  } else {
+    // When VEYRA_DEV is unset, the dev flags are still accepted by
+    // commander (so the rejection message can fire from validate),
+    // but `.hideHelp()` keeps them out of `--help` output.
+    cmd
+      .option(
+        '--dev-supabase-backend <id>',
+        'developer-only: requires VEYRA_DEV=1',
+      )
+      .option(
+        '--dev-supabase-schema <path>',
+        'developer-only: requires VEYRA_DEV=1',
+      );
+    // Hide both from the rendered help when VEYRA_DEV is unset.
+    for (const opt of cmd.options) {
+      if (opt.long === '--dev-supabase-backend' || opt.long === '--dev-supabase-schema') {
+        opt.hidden = true;
+      }
+    }
+  }
+  return cmd;
 }
 
 export function defaultScanCommandDeps(): ScanCommandDeps {
@@ -814,6 +1165,9 @@ function parseRawOptions(raw: Record<string, unknown>): ScanOptions {
     lovableMcp: raw.lovableMcp === true,
     ...maybeString('lovableProject', raw.lovableProject),
     ...maybeString('supabaseMcp', raw.supabaseMcp),
+    ...maybeString('supabase', raw.supabase),
+    ...maybeString('devSupabaseBackend', raw.devSupabaseBackend),
+    ...maybeString('devSupabaseSchema', raw.devSupabaseSchema),
     ai: raw.ai !== false,
     ...maybeString('aiProvider', raw.aiProvider),
     ...maybeString('aiHypothesisBudget', raw.aiHypothesisBudget),

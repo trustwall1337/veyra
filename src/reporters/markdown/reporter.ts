@@ -68,6 +68,18 @@ export interface MarkdownReportOptions {
    * `AI was disabled for this scan` note instead.
    */
   readonly aiUsage?: AiUsageSummary;
+  /**
+   * Step 24: which Supabase schema source the scan used. The Sources
+   * section renders a one-line note in allowed-claims wording so the
+   * reader knows whether tables/policies came from a local SQL dump
+   * or a live MCP read. `'mcp_overriding_sql_file'` covers the case
+   * where the customer supplied both flags.
+   */
+  readonly schemaSource?:
+    | 'sql_file'
+    | 'mcp'
+    | 'mcp_overriding_sql_file'
+    | 'rest';
 }
 
 function renderFinding(f: Finding): string {
@@ -323,6 +335,26 @@ function renderUncertaintyNotesSection(report: ReadinessReport): string {
 
 function renderSourcesSection(options: MarkdownReportOptions): string {
   const lines: string[] = [STRINGS.HEADING_SOURCES, '', STRINGS.SOURCES_HEADER];
+  // Step 24: schema-source note. Rendered first so the reader sees
+  // where Supabase tables/policies came from before scrolling to AI
+  // usage. Allowed-claims wording per CLAUDE.md §Output language.
+  if (options.schemaSource !== undefined) {
+    lines.push('');
+    switch (options.schemaSource) {
+      case 'sql_file':
+        lines.push(STRINGS.SOURCES_SCHEMA_SOURCE_SQL_FILE);
+        break;
+      case 'mcp':
+        lines.push(STRINGS.SOURCES_SCHEMA_SOURCE_MCP);
+        break;
+      case 'mcp_overriding_sql_file':
+        lines.push(STRINGS.SOURCES_SCHEMA_SOURCE_MCP_OVERRIDING_SQL_FILE);
+        break;
+      case 'rest':
+        lines.push(STRINGS.SOURCES_SCHEMA_SOURCE_REST);
+        break;
+    }
+  }
   if (options.aiConcerns === undefined) {
     // --no-ai mode: tier 2 was omitted from the body; Sources carries
     // the disabled-AI note per step 13b contract.

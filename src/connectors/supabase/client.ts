@@ -30,6 +30,16 @@ import {
 
 export interface SupabaseTransport {
   invokeTool(name: string, args: Readonly<Record<string, unknown>>): Promise<unknown>;
+  /**
+   * Step 25 retro-f2: optional lifecycle hook. Production transports
+   * that hold child-process / network handles (e.g. the SDK-backed
+   * stdio transport spawning `npx @supabase/mcp-server-supabase`)
+   * release them here. `runScan` calls `close()` from a `finally`
+   * block so the subprocess + SDK client are torn down even when
+   * the scan errors out. Test transports may omit this — the field
+   * is optional and callers must null-check before invoking.
+   */
+  close?(): Promise<void>;
 }
 
 export interface SupabaseClientOptions {

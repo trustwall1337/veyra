@@ -231,15 +231,26 @@ constraints, and the per-agent dataflow lives in
 
 - [`docs/phase-1.md`](./docs/phase-1.md) — Phase 1 overview, CLI flags,
   how to run a scan, how to read the report, known limits.
+- [`docs/lovable.md`](./docs/lovable.md) — how Veyra reads Lovable code
+  in Phase 1 (local git clone) and why `--lovable-mcp` is deferred to
+  step 28.
 - [`docs/lovable-mcp-safety.md`](./docs/lovable-mcp-safety.md) — Lovable
-  MCP allowlist + fixed prompt templates.
+  MCP allowlist + fixed prompt templates (historical; the flag is
+  deferred as of step 27).
 - [`docs/supabase-metadata-export.md`](./docs/supabase-metadata-export.md)
-  — what Supabase metadata Veyra reads, and how to export `schema.sql`.
+  — what Supabase metadata Veyra reads. As of step 27 the customer
+  default is the Supabase Management REST API (`--supabase
+  <project_ref>`); contributor-only paths (`--dev-supabase-schema`,
+  `--dev-supabase-backend supabase-mcp`) are documented behind
+  `VEYRA_DEV=1`.
 - [`docs/data-access-and-trust.md`](./docs/data-access-and-trust.md) —
   the trust model in plain language, with non-goals.
 - [`docs/how-ai-fits.md`](./docs/how-ai-fits.md) — the seven-layer
   architecture, the four artifact types, the §12b opt-in matrix, and
   the ten trust-model constraints.
+- [`phases/phase-1/decisions.md`](./phases/phase-1/decisions.md) —
+  material architectural decisions made during Phase 1 implementation
+  (currently: step 27 REST-default course-correction).
 
 ## Development
 

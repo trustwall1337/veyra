@@ -80,7 +80,10 @@ async function runGate(): Promise<{
   const supabaseRls = createSupabaseRlsAgent();
   const supabaseR = await supabaseRls.run(
     {
-      schemaSqlPath: path.join(FIXTURE_ROOT, 'supabase/schema.sql'),
+      schemaSource: {
+        source: 'sql_file',
+        schemaSqlPath: path.join(FIXTURE_ROOT, 'supabase/schema.sql'),
+      },
       storageBucketsArtifactPath: path.join(
         FIXTURE_ROOT,
         'mcp-fixtures/supabase-storage-buckets.json',

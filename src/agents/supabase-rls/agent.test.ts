@@ -162,7 +162,10 @@ describe('agent integration — vulnerable fixture', () => {
     const c = await ctx();
     const agent = createSupabaseRlsAgent();
     const r = await agent.run(
-      { schemaSqlPath: schemaPath, storageBucketsArtifactPath: bucketsPath },
+      {
+        schemaSource: { source: 'sql_file', schemaSqlPath: schemaPath },
+        storageBucketsArtifactPath: bucketsPath,
+      },
       c,
     );
     expect(r.status).toBe('completed');
@@ -196,9 +199,90 @@ describe('agent integration — vulnerable fixture', () => {
     const schemaPath = path.join(fixtureRoot, 'supabase/schema.sql');
     const c = await ctx();
     const agent = createSupabaseRlsAgent();
-    const r = await agent.run({ schemaSqlPath: schemaPath }, c);
+    const r = await agent.run(
+      { schemaSource: { source: 'sql_file', schemaSqlPath: schemaPath } },
+      c,
+    );
     const cc12 = r.findings.find((f) => f.control_id === 'cc-11-12');
     expect(cc12?.finding_type).toBe('coverage_gap');
+  });
+
+  it('step 26 Piece 2: loud failure — non-trivial dump that parses to 0 emits 4 coverage_gap Findings (cc-11-5/6/9/12) citing a diagnostic fact_id', async () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const failureShapeFixture = path.resolve(
+      here,
+      '__fixtures__/parse-failure-shape.sql',
+    );
+    const c = await ctx();
+    const agent = createSupabaseRlsAgent();
+    const r = await agent.run(
+      { schemaSource: { source: 'sql_file', schemaSqlPath: failureShapeFixture } },
+      c,
+    );
+    expect(r.status).toBe('completed');
+    const parseFailureFindings = r.findings.filter(
+      (f) => f.id.endsWith('-schema-parser-failure'),
+    );
+    expect(parseFailureFindings).toHaveLength(4);
+    const controlIds = parseFailureFindings.map((f) => f.control_id).sort();
+    expect(controlIds).toEqual(['cc-11-12', 'cc-11-5', 'cc-11-6', 'cc-11-9']);
+    // Per codex retro-f1: each Finding cites the same diagnostic
+    // fact_id in evidence_refs.
+    const firstFactId = parseFailureFindings[0]?.evidence_refs[0];
+    expect(firstFactId).toBeDefined();
+    expect(firstFactId?.length).toBe(64); // sha256 hex
+    for (const f of parseFailureFindings) {
+      expect(f.evidence_refs).toEqual([firstFactId]);
+      expect(f.finding_type).toBe('coverage_gap');
+      // Allowed-claims wording — no "secure"/"safe"/"compliant" and
+      // includes the diagnostic counts.
+      expect(f.summary).toMatch(/Needs human review/);
+      expect(f.summary).toMatch(/CREATE TABLE lines=/);
+      expect(f.summary).toMatch(/CREATE POLICY lines=/);
+    }
+    // The warning string carries the per-line counts for audit.
+    expect(r.warnings.some((w) => w.startsWith('parse_failure:'))).toBe(true);
+
+    // Step 26 retro-f1: evidence_refs must resolve to a persisted
+    // ScanFact. The agent writes supabase-parse-failure.json and the
+    // Finding's evidence_refs[0] is the same fact_id that lives in
+    // that artifact's scan_facts array.
+    const parseFailureArtifact = r.artifacts.find((a) =>
+      a.path.endsWith('supabase-parse-failure.json'),
+    );
+    expect(parseFailureArtifact).toBeDefined();
+    if (parseFailureArtifact !== undefined) {
+      const text = await fs.readFile(parseFailureArtifact.path, 'utf8');
+      const parsed = JSON.parse(text) as {
+        scan_facts: { fact_id: string }[];
+      };
+      const persistedFactIds = new Set(parsed.scan_facts.map((f) => f.fact_id));
+      expect(persistedFactIds.has(firstFactId!)).toBe(true);
+    }
+  });
+
+  it('step 26 Piece 2: trivial / preamble-only input does NOT trigger parse_failure (codex retro-f2 gate)', async () => {
+    // Write a tiny preamble-only file to disk and run the agent
+    // against it. Bytes are large (filled with SET/COMMENT lines) but
+    // signal counts (CREATE TABLE / CREATE POLICY / ENABLE RLS) are
+    // zero — the loud-failure gate must NOT fire.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'veyra-step26-noise-'));
+    const noisePath = path.join(tmp, 'noise.sql');
+    const filler = Array.from({ length: 50 })
+      .map((_v, i) => `SET local.dummy_${String(i)} = 'value-${String(i)}';`)
+      .join('\n');
+    await fs.writeFile(noisePath, filler);
+    const c = await ctx();
+    const agent = createSupabaseRlsAgent();
+    const r = await agent.run(
+      { schemaSource: { source: 'sql_file', schemaSqlPath: noisePath } },
+      c,
+    );
+    // No parse_failure Findings — bytes are non-trivial but signal
+    // counts are zero, so the gate intentionally does not fire.
+    const pf = r.findings.filter((f) => f.id.endsWith('-schema-parser-failure'));
+    expect(pf).toHaveLength(0);
+    await fs.rm(tmp, { recursive: true, force: true });
   });
 });
 

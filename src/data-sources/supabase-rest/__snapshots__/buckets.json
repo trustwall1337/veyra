@@ -1,0 +1,4 @@
+[
+  { "id": "avatars", "name": "avatars", "public": true,  "created_at": "2025-06-01T00:00:00Z" },
+  { "id": "user-files", "name": "user-files", "public": false, "created_at": "2025-06-01T00:00:00Z" }
+]

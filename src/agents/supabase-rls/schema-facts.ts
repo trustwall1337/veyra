@@ -19,22 +19,37 @@ import type {
 
 import type { ParsedPolicy, ParsedSchema, ParsedTable } from './types.js';
 
-function mintParserId(): ParserId {
-  const r = asParserId('supabase-schema');
+function mintParserId(name: string): ParserId {
+  const r = asParserId(name);
   if (!r.ok) throw new Error(`bug: ${r.error.message}`);
   return r.value;
 }
 
-export const SUPABASE_SCHEMA_PARSER_ID: ParserId = mintParserId();
+export const SUPABASE_SCHEMA_PARSER_ID: ParserId = mintParserId('supabase-schema');
+// Step 24: distinct ParserId for MCP-sourced schema facts. The same
+// schema-element fact shape; only the provenance changes. Consumers
+// (predicates, tests) can read `source.parser_id` to learn whether
+// the observation came from a local SQL dump or a live MCP call.
+export const SUPABASE_MCP_PARSER_ID: ParserId = mintParserId('supabase-mcp');
+
+function parserIdFor(name: string): ParserId {
+  return name === 'supabase-mcp'
+    ? SUPABASE_MCP_PARSER_ID
+    : SUPABASE_SCHEMA_PARSER_ID;
+}
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function factForTable(table: ParsedTable, schemaPath: string): ScanFact {
+function factForTable(
+  table: ParsedTable,
+  schemaPath: string,
+  parserId: ParserId,
+): ScanFact {
   const source: SchemaElementSource = {
     kind: 'schema_element',
-    parser_id: SUPABASE_SCHEMA_PARSER_ID,
+    parser_id: parserId,
     element_kind: 'table',
     name: `${table.schema}.${table.name}`,
   };
@@ -58,10 +73,14 @@ function factForTable(table: ParsedTable, schemaPath: string): ScanFact {
   };
 }
 
-function factForPolicy(policy: ParsedPolicy, schemaPath: string): ScanFact {
+function factForPolicy(
+  policy: ParsedPolicy,
+  schemaPath: string,
+  parserId: ParserId,
+): ScanFact {
   const source: SchemaElementSource = {
     kind: 'schema_element',
-    parser_id: SUPABASE_SCHEMA_PARSER_ID,
+    parser_id: parserId,
     element_kind: 'policy',
     name: `${policy.schema}.${policy.table}:${policy.name}`,
   };
@@ -93,9 +112,11 @@ function factForPolicy(policy: ParsedPolicy, schemaPath: string): ScanFact {
 export function buildSchemaFacts(
   parsed: ParsedSchema,
   schemaPath: string,
+  parserName: string = 'supabase-schema',
 ): readonly ScanFact[] {
+  const parserId = parserIdFor(parserName);
   const facts: ScanFact[] = [];
-  for (const t of parsed.tables) facts.push(factForTable(t, schemaPath));
-  for (const p of parsed.policies) facts.push(factForPolicy(p, schemaPath));
+  for (const t of parsed.tables) facts.push(factForTable(t, schemaPath, parserId));
+  for (const p of parsed.policies) facts.push(factForPolicy(p, schemaPath, parserId));
   return facts;
 }

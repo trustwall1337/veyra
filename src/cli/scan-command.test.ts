@@ -106,7 +106,12 @@ function fakeEnv(map: Record<string, string>) {
   return (name: string): string | undefined => map[name];
 }
 
-function makeDeps(overrides: Partial<ScanCommandDeps> = {}): ScanCommandDeps {
+interface MakeDepsOverrides extends Partial<ScanCommandDeps> {
+  /** Shortcut: build envReader from a flat env map. */
+  readonly env?: Record<string, string>;
+}
+
+function makeDeps(overrides: MakeDepsOverrides = {}): ScanCommandDeps {
   const base: ScanCommandDeps = {
     stat: fakeStat({}),
     orchestratorFactory: () => fakeOrchestrator('not_implemented'),
@@ -117,7 +122,11 @@ function makeDeps(overrides: Partial<ScanCommandDeps> = {}): ScanCommandDeps {
     envReader: fakeEnv({}),
     providerRegistry: createDefaultProviderRegistry(),
   };
-  return { ...base, ...overrides };
+  const { env, ...rest } = overrides;
+  if (env !== undefined) {
+    return { ...base, envReader: fakeEnv(env), ...rest };
+  }
+  return { ...base, ...rest };
 }
 
 function baseOptions(overrides: Partial<ScanOptions> = {}): ScanOptions {
@@ -168,12 +177,57 @@ describe('runScan — argv and validation', () => {
     }
   });
 
-  it('rejects --supabase-schema that is a directory, not a file', async () => {
+  it('rejects legacy --supabase-schema with the step-27 deprecated message', async () => {
     const deps = makeDeps({
       stat: fakeStat({ '/proj': 'dir', '/schema-dir': 'dir' }),
     });
     const result = await runScan(
       baseOptions({ supabaseSchema: '/schema-dir' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--supabase-schema');
+      expect(result.error.message).toContain('VEYRA_DEV=1');
+      expect(result.error.message).toContain('--dev-supabase-schema');
+    }
+  });
+
+  it('--dev-supabase-schema requires VEYRA_DEV=1 (developer-flag double-gate)', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir', '/schema.sql': 'file' }),
+      env: {}, // VEYRA_DEV unset
+    });
+    const result = await runScan(
+      baseOptions({ devSupabaseSchema: '/schema.sql' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('VEYRA_DEV=1');
+      expect(result.error.message).toContain('--dev-supabase-schema');
+    }
+  });
+
+  it('--dev-supabase-schema accepted when VEYRA_DEV=1 + file exists', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir', '/schema.sql': 'file' }),
+      env: { VEYRA_DEV: '1' },
+    });
+    const result = await runScan(
+      baseOptions({ devSupabaseSchema: '/schema.sql' }),
+      deps,
+    );
+    expect(isOk(result)).toBe(true);
+  });
+
+  it('--dev-supabase-schema with VEYRA_DEV=1 still rejects a directory', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir', '/schema-dir': 'dir' }),
+      env: { VEYRA_DEV: '1' },
+    });
+    const result = await runScan(
+      baseOptions({ devSupabaseSchema: '/schema-dir' }),
       deps,
     );
     expect(isErr(result)).toBe(true);
@@ -249,7 +303,7 @@ describe('runScan — argv and validation', () => {
     }
   });
 
-  it('rejects --lovable-mcp without --lovable-project', async () => {
+  it('rejects --lovable-mcp at parse-time with the step-28-deferred message (step 27 Done-When #6)', async () => {
     const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
     const result = await runScan(
       baseOptions({ lovableMcp: true }),
@@ -257,12 +311,13 @@ describe('runScan — argv and validation', () => {
     );
     expect(isErr(result)).toBe(true);
     if (isErr(result)) {
-      expect(result.error.message).toContain('--lovable-mcp');
-      expect(result.error.message).toContain('--lovable-project');
+      expect(result.error.message).toContain('Lovable OAuth client');
+      expect(result.error.message).toContain('step 28');
+      expect(result.error.message).toContain('local git clone');
     }
   });
 
-  it('accepts --lovable-mcp WITH --lovable-project', async () => {
+  it('rejects --lovable-mcp even WITH --lovable-project (step 27 — flag is deferred regardless)', async () => {
     const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
     const result = await runScan(
       baseOptions({
@@ -271,7 +326,89 @@ describe('runScan — argv and validation', () => {
       }),
       deps,
     );
-    expect(isOk(result)).toBe(true);
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('step 28');
+    }
+  });
+
+  it('rejects legacy --supabase-mcp at parse-time with the migration message (step 27 Done-When #5)', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await runScan(
+      baseOptions({ supabaseMcp: 'aukqmgjnoldnhrvsolhh' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--supabase-mcp is deprecated');
+      expect(result.error.message).toContain('--supabase <project_ref>');
+      expect(result.error.message).toContain('VEYRA_DEV=1');
+      expect(result.error.message).toContain('--dev-supabase-backend supabase-mcp');
+    }
+  });
+
+  it('--supabase <ref> requires SUPABASE_ACCESS_TOKEN in the environment', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      env: {},
+    });
+    const result = await runScan(
+      baseOptions({ supabase: 'aukqmgjnoldnhrvsolhh' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--supabase requires SUPABASE_ACCESS_TOKEN');
+    }
+  });
+
+  it('--supabase rejects malformed project_ref before any I/O', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      env: { SUPABASE_ACCESS_TOKEN: 'tok' },
+    });
+    const result = await runScan(
+      baseOptions({ supabase: 'NOT-VALID' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--supabase project_ref must be');
+    }
+  });
+
+  it('--dev-supabase-backend requires VEYRA_DEV=1', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      env: { SUPABASE_ACCESS_TOKEN: 'tok' },
+    });
+    const result = await runScan(
+      baseOptions({
+        supabase: 'aukqmgjnoldnhrvsolhh',
+        devSupabaseBackend: 'supabase-mcp',
+      }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('VEYRA_DEV=1');
+      expect(result.error.message).toContain('--dev-supabase-backend');
+    }
+  });
+
+  it('--dev-supabase-backend requires --supabase to identify the project', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      env: { VEYRA_DEV: '1', SUPABASE_ACCESS_TOKEN: 'tok' },
+    });
+    const result = await runScan(
+      baseOptions({ devSupabaseBackend: 'supabase-mcp' }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--dev-supabase-backend requires --supabase');
+    }
   });
 
   it('accepts read_only_evidence in production env', async () => {

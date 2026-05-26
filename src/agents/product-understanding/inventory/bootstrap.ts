@@ -3,6 +3,10 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
 import { redactSecrets } from '../../../ai/sanitization.js';
+import {
+  walkPaths,
+  type CodeSourceFs,
+} from '../../../data-sources/lovable-github-clone/code-source.js';
 import { type Result, err, ok } from '../../../types/result.js';
 import type { ScanFact } from '../../../types/scan-fact.js';
 import type { ValidationPolicy } from '../../../types/validation-policy.js';
@@ -74,7 +78,30 @@ const DIR_DENYLIST: readonly string[] = [
   '.git',
   '.vercel',
   '.cache',
+  // Step 26 Piece 3: skip Veyra's own scan output directory at any
+  // depth. A scan against `--project .` where prior scans wrote
+  // `.veyra/scans/<id>/...` would otherwise list those entries as
+  // "observed evidence" in the report, polluting the operator's
+  // view with the tool's own outputs.
+  '.veyra',
 ];
+
+// Step 26 Piece 3: path-prefix exclusions (segments not at the leaf).
+// `supabase/.temp/` is the Supabase CLI's temp-metadata directory;
+// segments under it (`cli-latest`, schema introspection cache, etc.)
+// are tool-internal, not customer code. The walk checks the
+// relative path against each prefix in addition to the leaf-only
+// `DIR_DENYLIST` above.
+const PATH_PREFIX_DENYLIST: readonly string[] = ['supabase/.temp'];
+
+function isExcludedPath(relativePath: string): boolean {
+  const normalized = relativePath.split(path.sep).join('/');
+  return PATH_PREFIX_DENYLIST.some(
+    (prefix) =>
+      normalized === prefix ||
+      normalized.startsWith(`${prefix}/`),
+  );
+}
 
 const SOURCE_EXTENSIONS: readonly string[] = [
   '.ts',
@@ -102,7 +129,14 @@ export async function buildBootstrapInventory(
 
   let fileMap: readonly string[];
   try {
-    fileMap = await walk(io, options.projectRoot, maxFiles, maxDepth);
+    // Step 28a: file-walk extracted into the lovable-github-clone
+    // CodeSource module. BootstrapFs and CodeSourceFs are
+    // structurally identical (readDir/stat/readFile), so the existing
+    // injected fake flows through unchanged. The CodeSource interface
+    // wraps this same logic for the registry path; bootstrap continues
+    // to call the helper directly to preserve the `readonly string[]`
+    // public API of `buildBootstrapInventory`.
+    fileMap = await walkPaths(io as CodeSourceFs, options.projectRoot, maxFiles, maxDepth);
   } catch (cause) {
     const m = cause instanceof Error ? cause.message : String(cause);
     return err(new BootstrapError(`file walk failed: ${m}`));
@@ -244,41 +278,11 @@ function capabilityAllows(
   return policy.allowed_actions.has(action);
 }
 
-async function walk(
-  io: BootstrapFs,
-  root: string,
-  maxFiles: number,
-  maxDepth: number,
-): Promise<readonly string[]> {
-  const out: string[] = [];
-  async function recurse(absolute: string, depth: number): Promise<void> {
-    if (depth > maxDepth || out.length >= maxFiles) return;
-    let entries: readonly string[];
-    try {
-      entries = await io.readDir(absolute);
-    } catch {
-      return;
-    }
-    for (const name of entries) {
-      if (DIR_DENYLIST.includes(name)) continue;
-      const full = path.join(absolute, name);
-      let s: { isDirectory(): boolean; isFile(): boolean };
-      try {
-        s = await io.stat(full);
-      } catch {
-        continue;
-      }
-      if (s.isDirectory()) {
-        await recurse(full, depth + 1);
-      } else if (s.isFile()) {
-        out.push(path.relative(root, full));
-        if (out.length >= maxFiles) return;
-      }
-    }
-  }
-  await recurse(root, 0);
-  return out;
-}
+// Step 28a: the inline `walk(io, root, maxFiles, maxDepth)` helper was
+// extracted to `src/data-sources/lovable-github-clone/code-source.ts`
+// (`walkPaths`). DIR_DENYLIST + PATH_PREFIX_DENYLIST + isExcludedPath
+// remain re-exported below for back-compat with tests that import them
+// from this module; the canonical home is the CodeSource module.
 
 async function readPackageJson(
   io: BootstrapFs,
