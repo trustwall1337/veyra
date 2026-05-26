@@ -1,6 +1,6 @@
 # Step 06 — `synthetic-data-manager` agent (Synthesize + Cleanup)
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 4`, §3.2, §3.4, §4.8, §11.2, §11.3
 **Produces:** agent (`src/agents/synthetic-data-manager/`) + connector (`src/connectors/supabase/admin/`)
 **Depends on:** 03
