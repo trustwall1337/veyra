@@ -1,6 +1,6 @@
 # Step 07 — Negative-test catalog (keyed by `control_id`)
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 5`, §12 (catalog-drift risk)
 **Produces:** test catalog under `src/agents/sandbox-runner/test-catalog/` (one file per `control_id`)
 **Depends on:** 02
