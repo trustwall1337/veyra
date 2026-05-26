@@ -20,6 +20,24 @@ export const STRINGS = {
   HEADING_UNCERTAINTY_NOTES: '## Uncertainty notes',
   HEADING_SOURCES: '## Sources and scanner metadata',
 
+  // Step 2.12 Phase 2 sections.
+  HEADING_ACTIVE_VALIDATION: '## Active validation outcomes',
+  HEADING_CLEANUP_PROOF: '## Cleanup proof',
+  HEADING_AI_EXPLANATIONS: '## AI-suggested areas for human review',
+
+  ACTIVE_VALIDATION_NONE_RUN:
+    'No active-validation tests were run in this scan (Phase 1 read-only-evidence mode or Phase 2 --no-ai with no deterministic plan).',
+  ACTIVE_VALIDATION_INCONCLUSIVE_NOTE:
+    'Any inconclusive outcome needs human review. Negative tests should be added once the root cause of the inconclusive signal is identified.',
+  CLEANUP_PROOF_RESIDUAL_ZERO:
+    'All synthetic data Veyra created was deleted. residual_count: 0.',
+  CLEANUP_PROOF_RESIDUAL_NONZERO_PREFIX:
+    'Veyra-created synthetic data remained after cleanup retries. residual_count:',
+  AI_EXPLANATIONS_DISABLED_NOTE:
+    'AI explanations were disabled for this scan (--no-ai or no AiProvider configured). Findings render without AI-suggested narrative.',
+  AI_EXPLANATIONS_LOW_CONFIDENCE_SUBHEAD:
+    '### Low-confidence AI suggestions (rendered for audit; below the visibility threshold)',
+
   SUMMARY_NO_BLOCKERS:
     'No items appear launch-blocking in this scan. Heuristic findings still need human review.',
   SUMMARY_BLOCKERS_PREFIX:

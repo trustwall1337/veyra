@@ -1,6 +1,6 @@
 # Step 12 — Reporter: active-validation + cleanup-proof + AI sections
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 10`, §9 (allowed language), §11.4 (Sources section)
 **Produces:** reporter extension (`src/reporters/markdown/evidence/`, `src/reporters/markdown/sections/`)
 **Depends on:** 10e
