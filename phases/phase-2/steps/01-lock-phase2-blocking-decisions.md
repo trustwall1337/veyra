@@ -1,6 +1,6 @@
 # Step 01 — Lock Phase 2 blocking decisions
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §6.1` + §11.1 + §10.6; `FINAL_PRODUCT_PLAN §17 Phase 2`
 **Produces:** `phases/phase-2/decisions.md` + any new `package.json` pins (e.g. `@anthropic-ai/sdk`, `@supabase/supabase-js`, signing-tool dep TBD)
 **Depends on:** none
