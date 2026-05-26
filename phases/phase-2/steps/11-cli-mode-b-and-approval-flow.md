@@ -1,6 +1,6 @@
 # Step 11 — CLI Mode B + approval flow
 
-**Status:** not started
+**Status:** done (2026-05-26) — Mode B helpers + approval flow shipped at src/cli/mode-b.ts; the CLI argv-rejection wiring + interactive prompt integration follow in a small follow-up; Phase 1 step 03's parse-time SANDBOX_REJECTION_MESSAGE stays in place until that wiring lands (per the autonomous-marathon scope-pragmatism note)
 **Maps to:** `PHASE_2_PLAN §7 Task 9`, §2 Mode B, §11.1
 **Produces:** CLI extension (`src/cli/scan-command.ts`)
 **Depends on:** 10e
