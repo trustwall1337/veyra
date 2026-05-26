@@ -1,0 +1,16 @@
+[
+  { "control_id": "cc-11-1",  "variant_id": "frontend-only",      "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-2",  "variant_id": "no-server-check",    "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-3",  "variant_id": "no-tenant-filter",   "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-4",  "variant_id": "client-provided",    "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-5",  "variant_id": "rls-off",            "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-5",  "variant_id": "rls-on",             "expected_outcome": "proven_denial"  },
+  { "control_id": "cc-11-6",  "variant_id": "using-true",         "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-9",  "variant_id": "all-auth",           "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-12", "variant_id": "public-bucket",      "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-13a","variant_id": "openapi-probe",      "expected_outcome": "inconclusive" },
+  { "control_id": "cc-11-13b","variant_id": "private-col-leak",   "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-13c","variant_id": "neq-filter",         "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-13d","variant_id": "embed-leak",         "expected_outcome": "proven_allowed" },
+  { "control_id": "cc-11-13e","variant_id": "filter-on-private",  "expected_outcome": "proven_allowed" }
+]

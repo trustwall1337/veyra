@@ -1,6 +1,6 @@
 # Step 13 — Fixture extension: sandbox + `expected-outcomes.json`
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 11`, §8 success criteria
 **Produces:** fixture (`examples/vulnerable-lovable-supabase/sandbox-fixture/`)
 **Depends on:** 10e
