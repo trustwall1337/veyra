@@ -1,6 +1,6 @@
 # Step 14 — Orchestrator two-phase runner + `scan-actions.log`
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 2 (completion)`, §4.0, §11.4
 **Produces:** infra (`src/core/orchestrator/scan-orchestrator.ts` extension + `src/core/audit/scan-actions-log.ts`)
 **Depends on:** 06, 08, 09, 10e
