@@ -91,8 +91,13 @@ describe('renderAiExplanationsSection', () => {
       aiConcernThreshold: 'medium',
     });
     expect(text).toContain('cc-11-5 (confidence: high)');
-    expect(text).toContain('Low-confidence AI suggestions');
-    expect(text).toContain('cc-11-1');
+    // Codex retro 2.12-below-threshold-ai-still-rendered: below-threshold
+    // entries are NOT rendered in the report body. Only a count
+    // referencing ai-enrichments.json + the --ai-concern-threshold
+    // flag remains.
+    expect(text).not.toContain('cc-11-1 (confidence: low)');
+    expect(text).toContain('ai-enrichments.json');
+    expect(text).toContain('--ai-concern-threshold');
   });
 
   it('low threshold renders everything in the main body', () => {

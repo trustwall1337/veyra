@@ -84,25 +84,27 @@ export interface AiSecurityPlannerOutput {
 }
 
 /**
- * Deterministic fallback: every mandatory baseline control gets a
- * `priority: 'medium'` entry. Used when `aiDisabled` is true OR when
- * the AI call fails. The compiler treats this as a valid producer
- * output (the producer_id distinguishes from AI output).
+ * Deterministic fallback: codex retro 2.07b-fallback-baseline-incomplete.
+ * Used to ship ONLY the 4 mandatory baseline controls — meaning
+ * --no-ai produced a thin plan that exercised cc-11-1/2/5/9 only.
+ * Retro fix: the fallback now emits every Phase-2-active-supported
+ * catalog control, so --no-ai is a complete active-validation path.
+ * Mandatory baseline controls get priority 'high'; the rest 'medium'.
  */
 function buildDeterministicPlan(
   scanId: string,
   catalogIds: readonly string[],
 ): ProposedScanPlan {
   const baselineSet = new Set(MANDATORY_BASELINE_CONTROL_IDS);
-  const entries: ProposedScanPlanEntry[] = catalogIds
-    .filter((id) => baselineSet.has(id))
-    .map((id, idx) => ({
-      test_id: `${id}-baseline-${String(idx)}`,
-      control_id: id,
-      priority: 'medium',
-      parameters: {},
-      justification: `deterministic baseline — ${id} runs on every Phase 2 scan`,
-    }));
+  const entries: ProposedScanPlanEntry[] = catalogIds.map((id, idx) => ({
+    test_id: `${id}-baseline-${String(idx)}`,
+    control_id: id,
+    priority: baselineSet.has(id) ? 'high' : 'medium',
+    parameters: {},
+    justification: baselineSet.has(id)
+      ? `deterministic baseline (mandatory) — ${id} runs on every Phase 2 scan`
+      : `deterministic baseline (catalog) — ${id} runs when --no-ai is set; AI planner may re-rank in normal mode`,
+  }));
   return {
     scan_id: scanId,
     producer_id: PLANNER_ANALYZER_ID,
@@ -209,6 +211,36 @@ export function createAiSecurityPlannerAgent(): VeyraAgent<
         entries,
         generated_at: new Date().toISOString(),
       };
+      // Codex retro 2.07b-missing-ai-audit-fields: write a companion
+      // ai-planner-audit.json carrying model_id, prompt fingerprint,
+      // token usage, and any extracted confidence/uncertainty_notes.
+      // The plan itself stays minimal (compiler-consumable shape);
+      // the audit artifact is the §10.6 model-rollforward + §10.5
+      // confidence record.
+      const auditPath = path.join(context.artifactDir, 'ai-planner-audit.json');
+      const parsedObj =
+        typeof parsed === 'object' && parsed !== null
+          ? (parsed as Record<string, unknown>)
+          : {};
+      const auditPayload = {
+        scan_id: context.scanId,
+        producer_id: PLANNER_ANALYZER_ID,
+        model_id: aiR.value.model_id,
+        token_usage: aiR.value.usage,
+        confidence: typeof parsedObj['confidence'] === 'string' ? parsedObj['confidence'] : 'low',
+        uncertainty_notes:
+          typeof parsedObj['uncertainty_notes'] === 'string'
+            ? parsedObj['uncertainty_notes']
+            : '',
+        entry_count: entries.length,
+        recorded_at: new Date().toISOString(),
+      };
+      try {
+        await fs.writeFile(auditPath, JSON.stringify(auditPayload, null, 2), 'utf8');
+      } catch (cause) {
+        const m = cause instanceof Error ? cause.message : String(cause);
+        context.logger.warn(`ai-security-planner: failed to write audit artifact: ${m}`);
+      }
       return persistAndReturn(context, proposed, false, []);
     },
   };

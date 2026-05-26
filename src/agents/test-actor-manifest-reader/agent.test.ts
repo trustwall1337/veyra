@@ -163,8 +163,73 @@ describe('test-actor-manifest-reader agent — happy path', () => {
       path.join(workdir, ROLE_MODEL_ARTIFACT),
       'utf8',
     );
-    const rm = JSON.parse(roleModelText) as { confidence: string };
+    const rm = JSON.parse(roleModelText) as {
+      confidence: string;
+      source: string;
+      roles: { role_id: string }[];
+      tenancy: { scoped_resources: string[]; tenant_ownership: Record<string, unknown> };
+    };
     expect(rm.confidence).toBe('declared');
+    expect(rm.source).toBe('test-actor-manifest');
+    // Roles use role_id (opaque RoleId string), not 'role'.
+    expect(rm.roles[0]?.role_id.length).toBeGreaterThan(0);
+    expect(rm.tenancy.scoped_resources).toContain('invoices');
+  });
+
+  it('writes cleanup-proof.json with session_discard + zero-residual (codex retro 2.06b-missing-cleanup-proof)', async () => {
+    const { CLEANUP_PROOF_ARTIFACT } = await import('./agent.js');
+    const manifestPath = path.join(workdir, 'test-actors.yaml');
+    await writeFile(manifestPath, VALID_YAML, 'utf8');
+    const env = new Map<string, string>([
+      ['TEST_ADMIN_PW', 'admin-pw'],
+      ['TEST_ALICE_PW', 'alice-pw'],
+    ]);
+    const agent = createTestActorManifestReaderAgent();
+    await agent.run(
+      {
+        manifestPath,
+        authClient: fakeAuth(),
+        envReader: (n) => env.get(n),
+      },
+      fakeContext(),
+    );
+    const text = await readFile(path.join(workdir, CLEANUP_PROOF_ARTIFACT), 'utf8');
+    const proof = JSON.parse(text) as Record<string, unknown>;
+    expect(proof['sub_mode']).toBe('manifest');
+    expect(proof['created_count']).toBe(0);
+    expect(proof['residual_count']).toBe(0);
+    expect(proof['session_discard']).toBe(true);
+  });
+
+  it('synthetic-resources.json shape matches B.2 (codex retro 2.06b-resource-artifact-shape-drift)', async () => {
+    const manifestPath = path.join(workdir, 'test-actors.yaml');
+    await writeFile(manifestPath, VALID_YAML, 'utf8');
+    const env = new Map<string, string>([
+      ['TEST_ADMIN_PW', 'admin-pw'],
+      ['TEST_ALICE_PW', 'alice-pw'],
+    ]);
+    const agent = createTestActorManifestReaderAgent();
+    await agent.run(
+      {
+        manifestPath,
+        authClient: fakeAuth(),
+        envReader: (n) => env.get(n),
+      },
+      fakeContext(),
+    );
+    const text = await readFile(
+      path.join(workdir, SYNTHETIC_RESOURCES_ARTIFACT),
+      'utf8',
+    );
+    const r = JSON.parse(text) as {
+      identities: { uid: string; test_id: string }[];
+    };
+    // Same shape as src/agents/synthetic-data-manager/agent.ts emits:
+    // { uid, test_id } per identity.
+    for (const id of r.identities) {
+      expect(typeof id.uid).toBe('string');
+      expect(typeof id.test_id).toBe('string');
+    }
   });
 });
 

@@ -53,11 +53,14 @@ describe('compile — compile-rejects-out-of-allowed-actions', () => {
   });
 });
 
-describe('compile — compile-injects-missing-baseline (constraint 6)', () => {
-  it('injects missing baseline controls from the deterministic fallback', () => {
-    // Plan omits cc-11-5 and cc-11-9 (both mandatory baseline). Plan
-    // includes only cc-11-1 to show the compiler injects without
-    // erasing what was provided.
+describe('compile — compile-injects-missing-baseline (constraint 6, post-codex-retro stricter)', () => {
+  it('injects baselines that CAN be injected; rejects when any baseline cannot be injected (post-codex-retro 2.07c)', () => {
+    // Plan omits cc-11-2 / cc-11-5 / cc-11-9 (all mandatory baseline).
+    // Plan includes only cc-11-1 to show the compiler injects without
+    // erasing what was provided. Per codex-retro 2.07c, the compiler
+    // now refuses to silently skip baselines that fail prerequisites
+    // — cc-11-5 + cc-11-9 require a target table the fallback entry
+    // doesn't supply, so compilation surfaces those as err.
     const plan = proposed([
       {
         test_id: 't-cc-11-1',
@@ -72,19 +75,54 @@ describe('compile — compile-injects-missing-baseline (constraint 6)', () => {
       policy: modeBPolicy(),
       knownTables: ['public.orders'],
     });
+    expect(r.ok).toBe(false); // post-retro: strict
+    if (!r.ok) {
+      // Must surface the specific baselines that couldn't be injected.
+      const reasons = r.error.rejected_entries.map((re) => re.reason).join('\n');
+      expect(reasons).toContain('cc-11-5');
+      expect(reasons).toContain('cc-11-9');
+    }
+  });
+
+  it('compiles cleanly when ALL mandatory baselines can be injected', () => {
+    // Provide the table that cc-11-5 and cc-11-9 baselines need via
+    // deterministicBaselineEntries with explicit targets.
+    const plan = proposed([
+      {
+        test_id: 't-cc-11-1',
+        control_id: 'cc-11-1',
+        priority: 'medium',
+        parameters: {},
+        justification: 'unauth route check',
+      },
+    ]);
+    const r = compile({
+      proposed: plan,
+      policy: modeBPolicy(),
+      knownTables: ['public.orders'],
+      deterministicBaselineEntries: {
+        'cc-11-5': {
+          test_id: 'cc-11-5-baseline-injected',
+          control_id: 'cc-11-5',
+          priority: 'medium',
+          parameters: { target: { kind: 'table', ref: 'public.orders' } },
+          justification: 'baseline',
+        },
+        'cc-11-9': {
+          test_id: 'cc-11-9-baseline-injected',
+          control_id: 'cc-11-9',
+          priority: 'medium',
+          parameters: { target: { kind: 'table', ref: 'public.orders' } },
+          justification: 'baseline',
+        },
+      },
+    });
     expect(r.ok).toBe(true);
     if (r.ok) {
       const ids = r.value.entries.map((e) => e.control_id);
-      // Original entry preserved:
-      expect(ids).toContain('cc-11-1');
-      // Compiler injects mandatory baselines that weren't there AND whose
-      // required actions fit in the policy AND whose targets resolve:
-      // cc-11-2 (no target needed) should be injected.
-      expect(ids).toContain('cc-11-2');
-      // cc-11-5 and cc-11-9 require a target table; without one in the
-      // injected fallback the compiler skips them but records in
-      // baseline_injections only those that succeeded.
-      expect(r.value.baseline_injections.length).toBeGreaterThan(0);
+      for (const id of ['cc-11-1', 'cc-11-2', 'cc-11-5', 'cc-11-9']) {
+        expect(ids).toContain(id);
+      }
     }
   });
 });
@@ -144,7 +182,7 @@ describe('compile — per-scan budget cap', () => {
     }
   });
 
-  it('passes when entries fit under the identity budget', () => {
+  it('passes when entries fit under the identity budget (with full baseline injection)', () => {
     const r = compile({
       proposed: proposed([
         {
@@ -163,6 +201,15 @@ describe('compile — per-scan budget cap', () => {
         max_tenants: 5,
         max_records: 5,
         max_lifetime_seconds: 600,
+      },
+      deterministicBaselineEntries: {
+        'cc-11-9': {
+          test_id: 'cc-11-9-baseline',
+          control_id: 'cc-11-9',
+          priority: 'medium',
+          parameters: { target: { kind: 'table', ref: 'public.orders' } },
+          justification: 'baseline',
+        },
       },
     });
     expect(r.ok).toBe(true);
@@ -184,8 +231,34 @@ describe('compile — producer-agnostic', () => {
       ...aiPlan,
       producer_id: analyzerId('deterministic-fallback'),
     };
-    const a = compile({ proposed: aiPlan, policy: modeBPolicy() });
-    const b = compile({ proposed: detPlan, policy: modeBPolicy() });
+    const baselines = {
+      'cc-11-5': {
+        test_id: 'cc-11-5-baseline',
+        control_id: 'cc-11-5',
+        priority: 'medium' as const,
+        parameters: { target: { kind: 'table', ref: 'public.orders' } },
+        justification: 'baseline',
+      },
+      'cc-11-9': {
+        test_id: 'cc-11-9-baseline',
+        control_id: 'cc-11-9',
+        priority: 'medium' as const,
+        parameters: { target: { kind: 'table', ref: 'public.orders' } },
+        justification: 'baseline',
+      },
+    };
+    const a = compile({
+      proposed: aiPlan,
+      policy: modeBPolicy(),
+      knownTables: ['public.orders'],
+      deterministicBaselineEntries: baselines,
+    });
+    const b = compile({
+      proposed: detPlan,
+      policy: modeBPolicy(),
+      knownTables: ['public.orders'],
+      deterministicBaselineEntries: baselines,
+    });
     expect(a.ok).toBe(true);
     expect(b.ok).toBe(true);
     if (a.ok && b.ok) {

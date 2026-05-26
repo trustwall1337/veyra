@@ -12,6 +12,7 @@
  * this agent to complete).
  */
 
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
@@ -46,7 +47,10 @@ export interface AiEnrichment {
   readonly uncertainty_notes: string;
   readonly model_id: string;
   /** Mandatory audit field per §10.6. */
-  readonly prompt_fingerprint_sha256?: string;
+  // Codex retro 2.09-missing-prompt-fingerprint: required (not optional).
+  // Every enrichment carries the SHA-256 fingerprint of the request
+  // envelope so §10.6 audit reasoning can replay the trace.
+  readonly prompt_fingerprint_sha256: string;
 }
 
 export interface AiExplainerInput {
@@ -123,6 +127,23 @@ export function createAiExplainerAgent(): VeyraAgent<
           max_output_tokens: 800,
           response_schema: SCHEMA,
         };
+        // Codex retro 2.09-missing-prompt-fingerprint: compute the
+        // SHA-256 fingerprint over the request envelope BEFORE the
+        // call so it survives a failed response.
+        const promptFingerprintSha256 = createHash('sha256')
+          .update(
+            JSON.stringify({
+              system_bytes: (aiRequest.system as unknown as string)?.length ?? 0,
+              messages: aiRequest.messages.map((m) => ({
+                role: m.role,
+                bytes: (m.content as unknown as string).length,
+              })),
+              schema_bytes: aiRequest.response_schema
+                ? JSON.stringify(aiRequest.response_schema).length
+                : 0,
+            }),
+          )
+          .digest('hex');
         const r = await input.aiProvider.complete(aiRequest);
         if (!r.ok) {
           warnings.push(
@@ -153,6 +174,7 @@ export function createAiExplainerAgent(): VeyraAgent<
           uncertainty_notes:
             typeof p['uncertainty_notes'] === 'string' ? p['uncertainty_notes'] : '',
           model_id: r.value.model_id,
+          prompt_fingerprint_sha256: promptFingerprintSha256,
         });
       }
 

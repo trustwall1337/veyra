@@ -11,6 +11,22 @@ import {
 
 export const controlId = 'cc-11-5';
 
+/**
+ * Codex retro 2.07-rls-off-false-positive: a non-empty result set is
+ * NOT itself proof of unauthorized cross-tenant access — the rows
+ * could legitimately belong to the actor's tenant. proven_allowed
+ * requires at least one row whose tenant_id differs from the actor
+ * tenant. Without that explicit assertion, route to `inconclusive`.
+ */
+function hasForeignTenantRow(body: unknown, actorTenant: string | undefined): boolean {
+  if (!Array.isArray(body)) return false;
+  return body.some((row) => {
+    if (typeof row !== 'object' || row === null) return false;
+    const t = (row as Record<string, unknown>)['tenant_id'];
+    return typeof t === 'string' && t !== actorTenant;
+  });
+}
+
 async function run(input: NegativeTestInput) {
   const started_at = Date.now();
   const response = await input.transport.send({
@@ -26,8 +42,7 @@ async function run(input: NegativeTestInput) {
     outcome = 'proven_denial';
   } else if (
     response.status === 200 &&
-    Array.isArray(response.body) &&
-    response.body.length > 0
+    hasForeignTenantRow(response.body, input.actor.tenant_id)
   ) {
     outcome = 'proven_allowed';
   }
@@ -41,6 +56,7 @@ async function run(input: NegativeTestInput) {
     assertion_details: {
       actor_tenant: input.actor.tenant_id ?? null,
       row_count: Array.isArray(response.body) ? response.body.length : 0,
+      foreign_rows_present: hasForeignTenantRow(response.body, input.actor.tenant_id),
     },
   });
 }

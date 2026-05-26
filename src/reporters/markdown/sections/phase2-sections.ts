@@ -120,12 +120,17 @@ export function renderAiExplanationsSection(
     }
     lines.push('');
   }
+  // Codex retro 2.12-below-threshold-ai-still-rendered: per the
+  // single-visibility-control contract, entries below the threshold
+  // are NOT rendered in the human-facing report body. They remain in
+  // ai-enrichments.json for audit. The reporter notes the count of
+  // suppressed entries so the customer can lower the threshold to
+  // surface them.
   if (below.length > 0) {
-    lines.push(STRINGS.AI_EXPLANATIONS_LOW_CONFIDENCE_SUBHEAD);
     lines.push('');
-    for (const e of below) {
-      lines.push(`- \`${e.control_id}\` (confidence: ${e.confidence}): ${e.explanation.slice(0, 120)}${e.explanation.length > 120 ? '…' : ''}`);
-    }
+    lines.push(
+      `${String(below.length)} additional AI suggestion(s) at confidence below \`${threshold}\` were recorded in \`ai-enrichments.json\` for audit but are not rendered here. Lower \`--ai-concern-threshold\` to surface them.`,
+    );
   }
   return lines.join('\n');
 }

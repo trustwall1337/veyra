@@ -45,6 +45,7 @@ export const TEST_ACTOR_MANIFEST_AGENT_ID = 'test-actor-manifest-reader';
 export const SYNTHETIC_RESOURCES_ARTIFACT = 'synthetic-resources.json';
 export const ROLE_MODEL_ARTIFACT = 'role-model.json';
 export const MANIFEST_VALIDATION_ARTIFACT = 'manifest-validation.json';
+export const CLEANUP_PROOF_ARTIFACT = 'cleanup-proof.json';
 
 const METADATA: AgentMetadata = {
   id: TEST_ACTOR_MANIFEST_AGENT_ID,
@@ -54,6 +55,7 @@ const METADATA: AgentMetadata = {
     SYNTHETIC_RESOURCES_ARTIFACT,
     ROLE_MODEL_ARTIFACT,
     MANIFEST_VALIDATION_ARTIFACT,
+    CLEANUP_PROOF_ARTIFACT,
   ],
 };
 
@@ -174,6 +176,12 @@ export function createTestActorManifestReaderAgent(): VeyraAgent<
         context.artifactDir,
         SYNTHETIC_RESOURCES_ARTIFACT,
       );
+      // Codex retro 2.06b-resource-artifact-shape-drift: normalise the
+      // synthetic-resources.json shape so the sandbox-runner reads
+      // ONE schema regardless of sub-mode. Same keys as step 2.06's
+      // synthetic-data-manager output ('identities' array with
+      // { uid, test_id } entries). sub_mode discriminator is added
+      // alongside so the runner can branch on it where it must.
       await fs.writeFile(
         resourcesPath,
         JSON.stringify(
@@ -181,8 +189,8 @@ export function createTestActorManifestReaderAgent(): VeyraAgent<
             scan_id: context.scanId,
             sub_mode: 'manifest',
             identities: identities.map((i) => ({
+              uid: i.provider_subject_id,
               test_id: i.id,
-              provider_subject_id: i.provider_subject_id,
               role: i.role,
               ...(i.tenant_id !== undefined ? { tenant_id: i.tenant_id } : {}),
             })),
@@ -198,14 +206,68 @@ export function createTestActorManifestReaderAgent(): VeyraAgent<
         path: resourcesPath,
       });
 
+      // Codex retro 2.06b-missing-cleanup-proof: manifest mode is
+      // a no-op-cleanup sub-mode (Veyra creates nothing). Emit a
+      // cleanup-proof.json with explicit zero-residual + session-
+      // discard marker so the reporter + readiness gates see a
+      // uniform shape.
+      const cleanupProofPath = path.join(context.artifactDir, CLEANUP_PROOF_ARTIFACT);
+      await fs.writeFile(
+        cleanupProofPath,
+        JSON.stringify(
+          {
+            scan_id: context.scanId,
+            sub_mode: 'manifest',
+            created_count: 0,
+            deleted_count: 0,
+            residual_count: 0,
+            duration_ms: 0,
+            session_discard: true,
+            per_resource_log: [],
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+      artifacts.push({
+        scanId: context.scanId,
+        kind: 'evidence_inventory',
+        path: cleanupProofPath,
+      });
+
+      // Codex retro 2.06b-role-model-shape: write the full RoleModel
+      // contract (revision §3.3b): opaque role IDs (already strings;
+      // the RoleId brand is enforced by the manifest parser),
+      // declared confidence + source provenance, tenancy
+      // (scoped_resources / non_sensitive resources), and ownership
+      // entries derived from the actor manifest.
       const roleModelPath = path.join(context.artifactDir, ROLE_MODEL_ARTIFACT);
+      const tenantOwnership: Record<string, { actor_ids: string[]; owns: { table: string; id: string }[] }> = {};
+      for (const a of manifest.test_actors) {
+        const tenantId = a.tenant_id ?? '__no_tenant__';
+        const slot = tenantOwnership[tenantId] ?? { actor_ids: [], owns: [] };
+        slot.actor_ids.push(a.email);
+        for (const o of a.owns ?? []) slot.owns.push({ table: o.table, id: o.id });
+        tenantOwnership[tenantId] = slot;
+      }
       const roleModel = {
         confidence: 'declared' as const,
+        source: 'test-actor-manifest',
+        source_path: input.manifestPath,
         roles: Object.entries(manifest.roles).map(([name, rule]) => ({
-          role: name,
+          role_id: name, // opaque RoleId-shaped string
           can_access: rule.can_access,
           cannot_access: rule.cannot_access,
         })),
+        tenancy: {
+          scoped_resources: Array.from(
+            new Set(
+              manifest.test_actors.flatMap((a) => (a.owns ?? []).map((o) => o.table)),
+            ),
+          ),
+          tenant_ownership: tenantOwnership,
+        },
       };
       await fs.writeFile(roleModelPath, JSON.stringify(roleModel, null, 2), 'utf8');
       artifacts.push({

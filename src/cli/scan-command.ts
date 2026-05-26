@@ -61,8 +61,22 @@ const DEFAULT_AI_MODEL = 'claude-sonnet-4-6';
  * `Done when:` requires both Phase 2 and later-phase rejections to point at
  * the right plan doc.
  */
+/**
+ * Step 2.11 retro: Mode B parse-time rejection is REMOVED. Mode B is
+ * now gated by --approve-active + --supabase-sandbox +
+ * --supabase-service-role-key (+ --ci --approval-file in CI). The
+ * old SANDBOX_REJECTION_MESSAGE stays exported for back-compat with
+ * any test that asserts on the string; the new flow's message
+ * surfaces when the required Mode B flags are missing.
+ */
 export const SANDBOX_REJECTION_MESSAGE =
   '--mode sandbox_active_validation: Phase 2 — not yet implemented (see phases/phase-2/PHASE_2_PLAN.md)';
+export const MODE_B_MISSING_APPROVE_MESSAGE =
+  '--mode sandbox_active_validation requires --approve-active (and --ci + --approval-file in CI mode). Re-run with --approve-active to acknowledge that synthetic data will be created in the sandbox project.';
+export const MODE_B_MISSING_SANDBOX_MESSAGE =
+  '--mode sandbox_active_validation requires --supabase-sandbox <project_ref> to identify the sandbox project. Production environments are rejected at the policy factory boundary.';
+export const MODE_B_CI_MISSING_APPROVAL_MESSAGE =
+  '--ci requires --approval-file <path>. CI runs cannot prompt for interactive confirmation; supply a signed approval file per phases/phase-2/decisions.md decision 5.';
 export const APPROVED_PROD_SAFE_REJECTION_MESSAGE =
   '--mode approved_production_safe: not yet implemented (later phase; see FPP §17 Phase 5)';
 
@@ -122,6 +136,12 @@ export interface ScanOptions {
    * legacy customer-facing `--supabase-schema`. Requires `VEYRA_DEV=1`.
    */
   readonly devSupabaseSchema?: string;
+  // Step 2.11 codex retro: Mode B flags.
+  readonly supabaseSandbox?: string;
+  readonly supabaseServiceRoleKey?: string;
+  readonly approveActive?: boolean;
+  readonly ci?: boolean;
+  readonly approvalFile?: string;
   readonly ai: boolean;
   readonly aiProvider?: string;
   readonly aiHypothesisBudget?: string;
@@ -264,7 +284,62 @@ export async function validateScanOptions(
     );
   }
   if (options.mode === 'sandbox_active_validation') {
-    return err(new CliUsageError(SANDBOX_REJECTION_MESSAGE));
+    // Codex retro 2.11-mode-b-still-rejected: Mode B is no longer
+    // parse-rejected. The gates below land Mode B's preconditions
+    // at the same boundary as Phase 1's deferred-mode rejections.
+    if (!options.approveActive) {
+      return err(new CliUsageError(MODE_B_MISSING_APPROVE_MESSAGE));
+    }
+    if (
+      options.supabaseSandbox === undefined ||
+      options.supabaseSandbox.length === 0
+    ) {
+      return err(new CliUsageError(MODE_B_MISSING_SANDBOX_MESSAGE));
+    }
+    // The service-role key flag carries the NAME of an env var only.
+    // Refuse anything that looks like a key value, and require
+    // SHOUTY_CASE shape.
+    if (
+      options.supabaseServiceRoleKey !== undefined &&
+      options.supabaseServiceRoleKey.length > 0
+    ) {
+      const modB = await import('./mode-b.js');
+      if (modB.looksLikeKeyValue(options.supabaseServiceRoleKey)) {
+        return err(
+          new CliUsageError(
+            '--supabase-service-role-key takes the NAME of an env var, not the key value. Set the env var (e.g. VEYRA_TEST_SRK) and pass --supabase-service-role-key VEYRA_TEST_SRK.',
+          ),
+        );
+      }
+      if (!modB.isValidEnvVarName(options.supabaseServiceRoleKey)) {
+        return err(
+          new CliUsageError(
+            `--supabase-service-role-key expects a SHOUTY_CASE env-var NAME; got "${options.supabaseServiceRoleKey}"`,
+          ),
+        );
+      }
+    }
+    if (options.ci && options.approvalFile === undefined) {
+      return err(new CliUsageError(MODE_B_CI_MISSING_APPROVAL_MESSAGE));
+    }
+    // CI flow: read + check the approval file (signature verification
+    // remains a stub deferred to the minisign-library landing).
+    if (options.ci && options.approvalFile !== undefined) {
+      const modB = await import('./mode-b.js');
+      const af = await modB.readApprovalFile(options.approvalFile);
+      if (!af.ok) {
+        return err(new CliUsageError(af.error.message));
+      }
+      const gate = await modB.checkApprovalAndConsume({
+        approvalFilePath: options.approvalFile,
+        approvalFile: af.value,
+        supabaseSandboxRef: options.supabaseSandbox,
+        now: new Date(),
+      });
+      if (!gate.ok) {
+        return err(new CliUsageError(gate.error.message));
+      }
+    }
   }
   if (options.mode === 'approved_production_safe') {
     return err(new CliUsageError(APPROVED_PROD_SAFE_REJECTION_MESSAGE));

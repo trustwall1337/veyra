@@ -236,7 +236,7 @@ describe('runScan — argv and validation', () => {
     }
   });
 
-  it('rejects --mode sandbox_active_validation with the Phase 2 message', async () => {
+  it('rejects --mode sandbox_active_validation without --approve-active (codex retro 2.11)', async () => {
     const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
     const result = await runScan(
       baseOptions({ mode: 'sandbox_active_validation' }),
@@ -244,11 +244,59 @@ describe('runScan — argv and validation', () => {
     );
     expect(isErr(result)).toBe(true);
     if (isErr(result)) {
-      expect(result.error.message).toBe(SANDBOX_REJECTION_MESSAGE);
-      expect(result.error.message).toContain('Phase 2 — not yet implemented');
-      expect(result.error.message).toContain(
-        'phases/phase-2/PHASE_2_PLAN.md',
-      );
+      // The legacy Phase 2 parse-time blanket reject was replaced with
+      // Mode B's missing-prerequisite gates per codex 2.11-mode-b-still-rejected.
+      expect(result.error.message).toContain('--approve-active');
+    }
+  });
+
+  it('rejects sandbox mode + --approve-active without --supabase-sandbox', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await runScan(
+      baseOptions({
+        mode: 'sandbox_active_validation',
+        approveActive: true,
+      }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--supabase-sandbox');
+    }
+  });
+
+  it('rejects --ci without --approval-file', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await runScan(
+      baseOptions({
+        mode: 'sandbox_active_validation',
+        approveActive: true,
+        supabaseSandbox: 'sandboxref01234567',
+        ci: true,
+      }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('--approval-file');
+    }
+  });
+
+  it('--supabase-service-role-key refuses a value-shaped string (env-var NAME only)', async () => {
+    const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
+    const result = await runScan(
+      baseOptions({
+        mode: 'sandbox_active_validation',
+        approveActive: true,
+        supabaseSandbox: 'sandboxref01234567',
+        // JWT-like value, NOT an env var name
+        supabaseServiceRoleKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig',
+      }),
+      deps,
+    );
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.message).toContain('NAME of an env var');
     }
   });
 

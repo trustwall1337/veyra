@@ -155,7 +155,14 @@ function resolveTarget(
       }
       return { ok: true, target: { kind, ref } };
     }
-    return { ok: true, target: { kind, ref } };
+    // Codex retro 2.07c-unknown-target-kind-accepted: reject any
+    // target.kind outside the closed compiler-supported set
+    // (table | bucket | route). New kinds register intentionally
+    // here; they do not fall through as ok.
+    return {
+      ok: false,
+      reason: `target.kind "${kind}" is not one of the compiler-supported kinds (table | bucket | route)`,
+    };
   }
   return {
     ok: false,
@@ -239,9 +246,18 @@ export function compile(
   // deterministic fallback). The step file's wording: "Compile-rejects-
   // unknown-target test ... → rejected" treats the bad-entry case as
   // a hard error.
+  // Codex retro 2.07c-mandatory-baseline-can-disappear: if a
+  // mandatory baseline cannot be injected (action not allowed,
+  // target not resolvable, budget exhausted), the compiler used to
+  // silently skip it and still return ok. That violates constraint 6
+  // (compiler is the floor; the baseline NEVER disappears). Now the
+  // compiler accumulates baseline-injection failures and routes to
+  // err with a structured reason naming the missing control and the
+  // failed prerequisite.
   const presentControls = new Set(compiledEntries.map((e) => e.control_id));
   const missingBaselines: string[] = [];
   const baselineInjections: string[] = [];
+  const baselineFailures: { entry: ProposedScanPlanEntry; reason: string }[] = [];
   if (rejected.length === 0) {
     for (const baseline of MANDATORY_BASELINE_CONTROL_IDS) {
       if (presentControls.has(baseline)) continue;
@@ -251,21 +267,51 @@ export function compile(
         defaultBaselineEntryFor(baseline);
       const requiredActions = ACTIONS_REQUIRED_BY_CONTROL[baseline] ?? [];
       const missing = requiredActions.filter((a) => !allowed.has(a));
-      if (missing.length > 0) continue;
+      if (missing.length > 0) {
+        baselineFailures.push({
+          entry: fallback,
+          reason: `mandatory baseline control_id "${baseline}" cannot run: policy denies actions ${missing.join(', ')}`,
+        });
+        continue;
+      }
       const tgt = resolveTarget(fallback, inputs);
-      if (!tgt.ok) continue;
+      if (!tgt.ok) {
+        baselineFailures.push({
+          entry: fallback,
+          reason: `mandatory baseline control_id "${baseline}" cannot run: ${tgt.reason}`,
+        });
+        continue;
+      }
       // Budget check on baseline injection — baselines respect the
       // same per-scan caps as AI-proposed entries.
       if (requiredActions.includes('create_synthetic_user')) {
-        if (identityBudget < 1) continue;
+        if (identityBudget < 1) {
+          baselineFailures.push({
+            entry: fallback,
+            reason: `mandatory baseline control_id "${baseline}" cannot run: identity budget exhausted`,
+          });
+          continue;
+        }
         identityBudget -= 1;
       }
       if (requiredActions.includes('create_synthetic_tenant')) {
-        if (tenantBudget < 1) continue;
+        if (tenantBudget < 1) {
+          baselineFailures.push({
+            entry: fallback,
+            reason: `mandatory baseline control_id "${baseline}" cannot run: tenant budget exhausted`,
+          });
+          continue;
+        }
         tenantBudget -= 1;
       }
       if (requiredActions.includes('create_synthetic_record')) {
-        if (recordBudget < 1) continue;
+        if (recordBudget < 1) {
+          baselineFailures.push({
+            entry: fallback,
+            reason: `mandatory baseline control_id "${baseline}" cannot run: record budget exhausted`,
+          });
+          continue;
+        }
         recordBudget -= 1;
       }
       compiledEntries.push({
@@ -277,9 +323,9 @@ export function compile(
     }
   }
 
-  if (rejected.length > 0) {
+  if (rejected.length > 0 || baselineFailures.length > 0) {
     return err({
-      rejected_entries: rejected,
+      rejected_entries: [...rejected, ...baselineFailures],
       missing_baseline_controls: missingBaselines,
     });
   }
