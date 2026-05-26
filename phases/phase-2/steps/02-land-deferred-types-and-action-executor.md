@@ -1,6 +1,6 @@
 # Step 02 — Phase 2 deferred types + `ActionExecutor` interface
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `PHASE_2_PLAN §7 Task 1`, §5.1, §6.1
 **Produces:** types in `src/types/active-validation.ts` (was placeholder) + `src/core/policy/executors/types.ts`
 **Depends on:** 01
