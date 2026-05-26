@@ -1,6 +1,6 @@
 # Step 10d — Extend `business-logic` agent for active validation
 
-**Status:** not started
+**Status:** done (2026-05-26 — see src/agents/_shared/active-validation-extensions.ts; per-agent integration is bundled in the shared helpers commit)
 **Maps to:** `PHASE_2_PLAN §7 Task 8`, §4.x business-logic extension
 **Produces:** agent extension (`src/agents/business-logic/`)
 **Depends on:** 08

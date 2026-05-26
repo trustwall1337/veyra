@@ -1,6 +1,6 @@
 # Step 10e — Extend `evidence-report` agent + new readiness rules
 
-**Status:** not started
+**Status:** done (2026-05-26 — see src/agents/_shared/active-validation-extensions.ts; per-agent integration is bundled in the shared helpers commit)
 **Maps to:** `PHASE_2_PLAN §7 Task 8`, §5.2, §5.3
 **Produces:** agent extension (`src/agents/evidence-report/readiness.ts`, `controls.ts`)
 **Depends on:** 10a, 10b, 10c, 10d
