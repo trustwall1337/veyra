@@ -1,6 +1,6 @@
 # Step 07c — `ActiveValidationPolicyCompiler` (Phase 2)
 
-**Status:** not started
+**Status:** done (2026-05-26)
 **Maps to:** `REVISION_AI_SHAPE.md §6.2, §7.4`; `PHASE_2_PLAN §4 AI-first revision additions`
 **Amends Phase 2 step:** none — new step file (lands after Phase 2 step 07 catalog ships)
 **Produces:** infra at `src/core/policy/active-validation-policy-compiler.ts`

@@ -1,75 +1,287 @@
 /**
- * `ActiveValidationPolicyCompiler` — the Phase 2 deterministic gate for
- * the executable scan plan.
+ * ActiveValidationPolicyCompiler (step 2.07c implementation).
  *
- * Per AI-shape revision §6.2:
+ * Deterministic gate for any `ProposedScanPlan` — regardless of producer.
+ * Validates plans typed against the shared `ProposedScanPlan` schema
+ * (step 2.02), drawn from the closed catalog (step 2.07), against the
+ * active `ValidationPolicy`. Producer-agnostic by design: AI Security
+ * Planner (2.07b) is one producer; the deterministic fallback is
+ * another. The compiler's safety guarantees do not depend on the
+ * producer being trustworthy.
  *
- *   "Gates the executable scan plan (§7 layer 6). Deterministic. Checks
- *    every entry's action is in `policy.allowed_actions`, every target
- *    exists in the project's known surface, every mandatory-baseline
- *    control has an entry (compiler injects if missing), and no entry
- *    exceeds the per-scan budget caps from `SyntheticDataPolicy`."
+ * Distinct from `ContextPolicyEvaluator` (Phase 1 step 08c) — they share
+ * zero code beyond the registry, `Result<T, E>`, and `AllowedAction`.
  *
- * This file is the **interface stub** only. The implementation lands in
- * Phase 2. Two separate stubs (this one + `ContextPolicyEvaluator`)
- * because the two policy components share zero code beyond the shared
- * `Result<T, E>` type — conflating them was the review caught in
- * revision §6.
- *
- * `ProposedScanPlan` and `CompiledScanPlan` are forward-declared
- * placeholder shapes — Phase 2 step files own their full definitions.
- * The placeholder shapes are deliberately opaque so this stub does not
- * leak Phase 2 design decisions back into Phase 1 foundation types.
+ * Phase 1 step 02b shipped this file as a placeholder stub with opaque
+ * `ProposedScanPlan` / `CompiledScanPlan` shapes; step 2.02 then
+ * shipped the real types under `src/types/scan-plan.ts`; this step
+ * (2.07c) replaces the stub with the real compile() implementation
+ * keyed off those real types.
  */
 
-import type { Result } from '../../types/result.js';
-import type { ValidationPolicy } from '../../types/validation-policy.js';
+import { ok, err, type Result } from '../../types/result.js';
+import type {
+  ActiveValidationCompilationError as ActiveValidationCompilationErrorShape,
+  CompiledScanPlan,
+  CompiledScanPlanEntry,
+  ProposedScanPlan,
+  ProposedScanPlanEntry,
+  TargetRef,
+} from '../../types/scan-plan.js';
+import type {
+  AllowedAction,
+  ValidationPolicy,
+} from '../../types/validation-policy.js';
+import type { SyntheticDataPolicy } from '../../types/active-validation.js';
+
+// Step 2.07c: the mandatory baseline lives here (src/core/policy/)
+// because the compiler is the authority. The AI Security Planner
+// imports it from this file; not the other way around (the
+// no-cross-layer-imports test forbids src/core/ → src/agents/).
+export const MANDATORY_BASELINE_CONTROL_IDS: readonly string[] = [
+  'cc-11-1',
+  'cc-11-2',
+  'cc-11-5',
+  'cc-11-9',
+];
+
+// Re-export the shared shape under the local name some callers
+// historically imported. Step 02b's class-shaped error stays around
+// as a wrapper for callers that want an Error instance; new callers
+// should use the shape from `src/types/scan-plan.ts`.
+export type { ActiveValidationCompilationErrorShape as ActiveValidationCompilationError };
+export type { CompiledScanPlan, ProposedScanPlan } from '../../types/scan-plan.js';
 
 /**
- * Placeholder — Phase 2 step files refine the shape. The `entries`
- * field is enough for the interface stub to compile against an
- * `entries.length` check today.
+ * Class form for callers that want `Error.message` ergonomics. Step
+ * 2.07c keeps both: the shape (re-exported above) is the canonical
+ * compile-error contract; this class wraps it for `throw`/`cause`
+ * chains.
  */
-export interface ProposedScanPlan {
-  readonly entries: readonly unknown[];
-}
-
-/**
- * Placeholder — Phase 2 step files refine. Mirrors `ProposedScanPlan`
- * intentionally so the compile signature stays symmetric.
- */
-export interface CompiledScanPlan {
-  readonly entries: readonly unknown[];
-}
-
-/**
- * Structured error for a rejected plan. Phase 2 widens this with
- * subtypes per rejection reason (action not allowed, target unknown,
- * budget exceeded). Today it is enough for downstream callers to type
- * `Result<CompiledScanPlan, ActiveValidationCompilationError>`.
- */
-export class ActiveValidationCompilationError extends Error {
+export class ActiveValidationCompilationErrorClass extends Error {
   override readonly name = 'ActiveValidationCompilationError';
-  public readonly rejected_entries: readonly unknown[];
-
   constructor(
     message: string,
-    rejected_entries: readonly unknown[] = [],
+    public readonly rejected_entries: readonly {
+      readonly entry: ProposedScanPlanEntry;
+      readonly reason: string;
+    }[] = [],
+    public readonly missing_baseline_controls: readonly string[] = [],
     options?: ErrorOptions,
   ) {
     super(message, options);
-    this.rejected_entries = rejected_entries;
   }
 }
 
-export interface ActiveValidationPolicyCompiler {
-  /**
-   * Validate a proposed plan and either compile it (with mandatory
-   * baseline entries injected when missing) or reject it with a
-   * structured error listing the offending entries.
-   */
-  compile(
-    proposed: ProposedScanPlan,
-    policy: ValidationPolicy,
-  ): Promise<Result<CompiledScanPlan, ActiveValidationCompilationError>>;
+/**
+ * Per-control-id required AllowedActions. Keyed by `control_id` (opaque
+ * string) per FPP §2A — no closed union switch.
+ */
+export const ACTIONS_REQUIRED_BY_CONTROL: Readonly<
+  Record<string, readonly AllowedAction[]>
+> = {
+  'cc-11-1': ['call_api_with_test_identity', 'verify_denial'],
+  'cc-11-2': ['create_synthetic_user', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-3': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-4': ['create_synthetic_user', 'create_synthetic_tenant', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-5': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-6': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-9': ['create_synthetic_user', 'create_synthetic_tenant', 'create_synthetic_record', 'call_api_with_test_identity', 'verify_denial'],
+  'cc-11-12': ['call_api_with_test_identity', 'verify_denial'],
+};
+
+export interface CompilerInputs {
+  readonly proposed: ProposedScanPlan;
+  readonly policy: ValidationPolicy;
+  readonly knownRoutes?: readonly string[];
+  readonly knownTables?: readonly string[];
+  readonly knownBuckets?: readonly string[];
+  readonly syntheticDataPolicy?: SyntheticDataPolicy;
+  readonly deterministicBaselineEntries?: Readonly<
+    Record<string, ProposedScanPlanEntry>
+  >;
+}
+
+const NO_TARGET_CONTROLS = new Set(['cc-11-1', 'cc-11-2']);
+
+function defaultBaselineEntryFor(controlId: string): ProposedScanPlanEntry {
+  return {
+    test_id: `${controlId}-baseline-injected`,
+    control_id: controlId,
+    priority: 'medium',
+    parameters: {},
+    justification: `mandatory baseline injected by ActiveValidationPolicyCompiler — ${controlId} was not in the proposed plan`,
+  };
+}
+
+function resolveTarget(
+  entry: ProposedScanPlanEntry,
+  inputs: CompilerInputs,
+): { ok: true; target: TargetRef } | { ok: false; reason: string } {
+  if (NO_TARGET_CONTROLS.has(entry.control_id)) {
+    return { ok: true, target: { kind: 'http_surface', ref: '*' } };
+  }
+  const param = entry.parameters['target'];
+  if (typeof param === 'object' && param !== null) {
+    const t = param as Record<string, unknown>;
+    const kind = typeof t['kind'] === 'string' ? (t['kind'] as string) : 'unknown';
+    const ref = typeof t['ref'] === 'string' ? (t['ref'] as string) : '';
+    if (kind === 'table') {
+      const known = new Set(inputs.knownTables ?? []);
+      if (!known.has(ref)) {
+        return { ok: false, reason: `target table "${ref}" not in known schema` };
+      }
+      return { ok: true, target: { kind, ref } };
+    }
+    if (kind === 'bucket') {
+      const known = new Set(inputs.knownBuckets ?? []);
+      if (!known.has(ref)) {
+        return { ok: false, reason: `target bucket "${ref}" not in known storage` };
+      }
+      return { ok: true, target: { kind, ref } };
+    }
+    if (kind === 'route') {
+      const known = new Set(inputs.knownRoutes ?? []);
+      if (!known.has(ref)) {
+        return { ok: false, reason: `target route "${ref}" not in inventory` };
+      }
+      return { ok: true, target: { kind, ref } };
+    }
+    return { ok: true, target: { kind, ref } };
+  }
+  return {
+    ok: false,
+    reason: `entry control_id "${entry.control_id}" requires parameters.target { kind, ref }`,
+  };
+}
+
+export function compile(
+  inputs: CompilerInputs,
+): Result<CompiledScanPlan, ActiveValidationCompilationErrorShape> {
+  const { proposed, policy } = inputs;
+  const allowed = policy.allowed_actions;
+  const rejected: { entry: ProposedScanPlanEntry; reason: string }[] = [];
+  const compiledEntries: CompiledScanPlanEntry[] = [];
+  let identityBudget = inputs.syntheticDataPolicy?.max_identities ?? Infinity;
+  let tenantBudget = inputs.syntheticDataPolicy?.max_tenants ?? Infinity;
+  let recordBudget = inputs.syntheticDataPolicy?.max_records ?? Infinity;
+
+  for (const entry of proposed.entries) {
+    const requiredActions = ACTIONS_REQUIRED_BY_CONTROL[entry.control_id];
+    if (requiredActions === undefined) {
+      rejected.push({
+        entry,
+        reason: `control_id "${entry.control_id}" not in compiler's ACTIONS_REQUIRED_BY_CONTROL map`,
+      });
+      continue;
+    }
+    const missing = requiredActions.filter((a) => !allowed.has(a));
+    if (missing.length > 0) {
+      rejected.push({
+        entry,
+        reason: `policy denies required actions: ${missing.join(', ')}`,
+      });
+      continue;
+    }
+    const tgt = resolveTarget(entry, inputs);
+    if (!tgt.ok) {
+      rejected.push({ entry, reason: tgt.reason });
+      continue;
+    }
+    if (requiredActions.includes('create_synthetic_user')) {
+      if (identityBudget < 1) {
+        rejected.push({
+          entry,
+          reason: `synthetic-data identity budget exhausted (max_identities=${String(inputs.syntheticDataPolicy?.max_identities)})`,
+        });
+        continue;
+      }
+      identityBudget -= 1;
+    }
+    if (requiredActions.includes('create_synthetic_tenant')) {
+      if (tenantBudget < 1) {
+        rejected.push({
+          entry,
+          reason: `synthetic-data tenant budget exhausted (max_tenants=${String(inputs.syntheticDataPolicy?.max_tenants)})`,
+        });
+        continue;
+      }
+      tenantBudget -= 1;
+    }
+    if (requiredActions.includes('create_synthetic_record')) {
+      if (recordBudget < 1) {
+        rejected.push({
+          entry,
+          reason: `synthetic-data record budget exhausted (max_records=${String(inputs.syntheticDataPolicy?.max_records)})`,
+        });
+        continue;
+      }
+      recordBudget -= 1;
+    }
+    compiledEntries.push({
+      ...entry,
+      validated_target_ref: tgt.target,
+      allowed_actions_satisfied: requiredActions,
+    });
+  }
+
+  // Step 2.07c rejection contract: ANY explicit entry rejection (wrong
+  // action, unknown target, budget exceeded) → err. Only the
+  // missing-baseline path is "soft" (the compiler injects from the
+  // deterministic fallback). The step file's wording: "Compile-rejects-
+  // unknown-target test ... → rejected" treats the bad-entry case as
+  // a hard error.
+  const presentControls = new Set(compiledEntries.map((e) => e.control_id));
+  const missingBaselines: string[] = [];
+  const baselineInjections: string[] = [];
+  if (rejected.length === 0) {
+    for (const baseline of MANDATORY_BASELINE_CONTROL_IDS) {
+      if (presentControls.has(baseline)) continue;
+      missingBaselines.push(baseline);
+      const fallback =
+        inputs.deterministicBaselineEntries?.[baseline] ??
+        defaultBaselineEntryFor(baseline);
+      const requiredActions = ACTIONS_REQUIRED_BY_CONTROL[baseline] ?? [];
+      const missing = requiredActions.filter((a) => !allowed.has(a));
+      if (missing.length > 0) continue;
+      const tgt = resolveTarget(fallback, inputs);
+      if (!tgt.ok) continue;
+      // Budget check on baseline injection — baselines respect the
+      // same per-scan caps as AI-proposed entries.
+      if (requiredActions.includes('create_synthetic_user')) {
+        if (identityBudget < 1) continue;
+        identityBudget -= 1;
+      }
+      if (requiredActions.includes('create_synthetic_tenant')) {
+        if (tenantBudget < 1) continue;
+        tenantBudget -= 1;
+      }
+      if (requiredActions.includes('create_synthetic_record')) {
+        if (recordBudget < 1) continue;
+        recordBudget -= 1;
+      }
+      compiledEntries.push({
+        ...fallback,
+        validated_target_ref: tgt.target,
+        allowed_actions_satisfied: requiredActions,
+      });
+      baselineInjections.push(fallback.test_id);
+    }
+  }
+
+  if (rejected.length > 0) {
+    return err({
+      rejected_entries: rejected,
+      missing_baseline_controls: missingBaselines,
+    });
+  }
+
+  const compiled: CompiledScanPlan = {
+    scan_id: proposed.scan_id,
+    source_producer_id: proposed.producer_id,
+    entries: compiledEntries,
+    compiled_at: new Date().toISOString(),
+    baseline_injections: baselineInjections,
+  };
+  return ok(compiled);
 }

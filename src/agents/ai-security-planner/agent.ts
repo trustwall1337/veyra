@@ -44,21 +44,18 @@ import { redactSecrets } from '../../ai/sanitization.js';
 // redactSecrets returns SanitizedMessage and is the only Phase 1
 // sanitizer that's both safe and ergonomic for prompt construction.
 import { getCatalogControlIds } from '../sandbox-runner/test-catalog/index.js';
+import { MANDATORY_BASELINE_CONTROL_IDS as CORE_BASELINE_IDS } from '../../core/policy/active-validation-policy-compiler.js';
 
 export const AI_SECURITY_PLANNER_AGENT_ID = 'ai-security-planner';
 export const PROPOSED_PLAN_ARTIFACT = 'proposed-scan-plan.json';
 
 /**
- * Mandatory baseline — every Phase 2 scan must check these controls.
- * If the AI planner omits any of them, the compiler (step 2.07c)
- * re-injects from the deterministic fallback.
+ * Re-export the mandatory baseline from the compiler. The compiler
+ * owns the authoritative list (src/core/policy/...); the planner
+ * consumes it. Reverse direction would violate the
+ * no-cross-layer-imports test (src/core/ → src/agents/ is forbidden).
  */
-export const MANDATORY_BASELINE_CONTROL_IDS: readonly string[] = [
-  'cc-11-1',
-  'cc-11-2',
-  'cc-11-5',
-  'cc-11-9',
-];
+export const MANDATORY_BASELINE_CONTROL_IDS: readonly string[] = CORE_BASELINE_IDS;
 
 const PLANNER_ANALYZER_ID: AnalyzerId = (() => {
   const r = asAnalyzerId('ai-security-planner');
