@@ -666,7 +666,7 @@ describe('validateScanOptions — §12b opt-in matrix', () => {
     }
   });
 
-  it('rejects --ai-provider openai as Phase 2 deferred with plan-doc pointer', async () => {
+  it('accepts --ai-provider openai now that step 2.04 flipped it to available', async () => {
     const deps = makeDeps({
       stat: fakeStat({ '/proj': 'dir' }),
       envReader: fakeEnv({ OPENAI_API_KEY: 'redacted' }),
@@ -675,13 +675,25 @@ describe('validateScanOptions — §12b opt-in matrix', () => {
       baseOptions({ aiProvider: 'openai' }),
       deps,
     );
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.aiOptIn).toBe(true);
+      expect(result.value.aiProvider).toBe('openai');
+    }
+  });
+
+  it('rejects --ai-provider openai when OPENAI_API_KEY is missing', async () => {
+    const deps = makeDeps({
+      stat: fakeStat({ '/proj': 'dir' }),
+      envReader: fakeEnv({}),
+    });
+    const result = await validateScanOptions(
+      baseOptions({ aiProvider: 'openai' }),
+      deps,
+    );
     expect(isErr(result)).toBe(true);
     if (isErr(result)) {
-      expect(result.error.message).toContain('Phase 2');
-      expect(result.error.message).toContain('not yet implemented');
-      expect(result.error.message).toContain(
-        'phases/phase-2/PHASE_2_PLAN.md',
-      );
+      expect(result.error.message).toContain('OPENAI_API_KEY');
     }
   });
 

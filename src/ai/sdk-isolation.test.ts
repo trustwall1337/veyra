@@ -96,3 +96,41 @@ describe('Anthropic SDK isolation', () => {
     expect(content).toContain('@anthropic-ai/sdk');
   });
 });
+
+// Step 2.04: same isolation discipline for the OpenAI SDK.
+const OPENAI_ALLOWED_FILES = new Set([
+  path.join(AI_DIR, 'openai.ts'),
+  path.join(AI_DIR, 'openai.test.ts'),
+  path.join(AI_DIR, 'sdk-isolation.test.ts'),
+  // no-sdk-imports.test.ts lists 'openai' as data; it does not import.
+  path.join(AI_DIR, 'no-sdk-imports.test.ts'),
+]);
+
+const OPENAI_FORBIDDEN_IMPORTS: readonly string[] = ['openai'];
+
+describe('OpenAI SDK isolation (step 2.04)', () => {
+  it('only src/ai/openai.ts imports openai', async () => {
+    const files = await listTsFiles(SRC_DIR);
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      if (OPENAI_ALLOWED_FILES.has(file)) continue;
+      const content = await fs.readFile(file, 'utf8');
+      const sources = extractImportSources(content);
+      for (const src of sources) {
+        for (const forbidden of OPENAI_FORBIDDEN_IMPORTS) {
+          // Exact match on bare module specifier "openai" (avoid
+          // false-positives on package names like "openai-foo").
+          if (src === forbidden) {
+            throw new Error(`forbidden OpenAI SDK import in ${file}: "${src}"`);
+          }
+        }
+      }
+    }
+  });
+
+  it('the adapter file itself imports openai (sanity check)', async () => {
+    const adapterPath = path.join(AI_DIR, 'openai.ts');
+    const content = await fs.readFile(adapterPath, 'utf8');
+    expect(content).toContain("from 'openai'");
+  });
+});

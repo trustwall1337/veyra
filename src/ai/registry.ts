@@ -55,11 +55,13 @@ function buildDefaultProviderEntries(): readonly ProviderEntry[] {
       },
     },
     {
+      // Step 2.04: OpenAI flipped from deferred to available. The
+      // adapter lives at `src/ai/openai.ts`; OPENAI_API_KEY is the
+      // env var name customers set to opt in.
       id: brandOrThrow('openai'),
       availability: {
-        kind: 'deferred',
-        deferredMessage:
-          '--ai-provider openai: Phase 2 — not yet implemented (see phases/phase-2/PHASE_2_PLAN.md)',
+        kind: 'available',
+        envVarName: 'OPENAI_API_KEY',
       },
     },
   ];

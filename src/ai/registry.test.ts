@@ -15,16 +15,13 @@ describe('createDefaultProviderRegistry', () => {
     }
   });
 
-  it('registers openai as deferred with a Phase 2 message pointing at the plan doc', () => {
+  it('registers openai as available (step 2.04 flipped from deferred)', () => {
     const registry = createDefaultProviderRegistry();
     const openai = registry.resolve('openai');
     expect(openai).toBeDefined();
-    expect(openai?.availability.kind).toBe('deferred');
-    if (openai?.availability.kind === 'deferred') {
-      expect(openai.availability.deferredMessage).toContain('Phase 2');
-      expect(openai.availability.deferredMessage).toContain(
-        'phases/phase-2/PHASE_2_PLAN.md',
-      );
+    expect(openai?.availability.kind).toBe('available');
+    if (openai?.availability.kind === 'available') {
+      expect(openai.availability.envVarName).toBe('OPENAI_API_KEY');
     }
   });
 
