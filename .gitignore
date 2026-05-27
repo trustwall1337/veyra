@@ -29,6 +29,9 @@ coverage/
 .claude/review-runs/
 .claude/plans/
 
+# Phases
+phases/
+
 # Veyra scan output (per-scan artifact directories + ad-hoc test reports).
 # `.veyra/scans/` is created by `pnpm dev -- scan` against any project;
 # under examples/ it gets created by manual fixture runs.

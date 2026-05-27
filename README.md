@@ -14,257 +14,181 @@ secrets, dependencies, and missing negative tests.
 **Veyra** suggests verification, evidence, and readiness without locking the
 product to one stack, vendor, or deployment model.
 
-## Product Shape
+## What Veyra is
 
-Veyra is not intended to be a scanner dashboard or an AI chat wrapper. The core
-product is a control-evidence graph:
+Veyra is an **agentic, bounded-multi-agent security-readiness analyzer**. An AI
+orchestrator reasons about your specific app to decide what to check and can
+spawn focused **sub-agents** to deep-dive a single target; a deterministic policy
+gate authorizes every action; deterministic predicates own every classification
+and every launch decision. Intelligence is the substrate; determinism is the
+trust spine.
 
-```text
-product context -> observed facts -> AI hypotheses -> deterministic assertions
-                -> control cards -> readiness report -> optional active tests
-```
+It is not a scanner dashboard, not an AI chat wrapper, and not an autonomous
+remediation bot. It is a control-evidence platform whose first analyzer targets
+Lovable + Supabase apps — frontend-only checks, weak authorization, missing
+tenant boundaries, broad RLS policies, public buckets, exposed service-role
+keys, and missing negative tests. The architecture supports other stacks later;
+Lovable and Supabase are the first adapters, not the permanent boundary.
 
-The first stack is Lovable + Supabase because it gives concrete launch risks:
-frontend-only checks, weak authorization, missing tenant boundaries, broad RLS
-policies, public buckets, exposed service-role keys, and missing negative tests.
-
-The architecture should support other stacks later. Lovable and Supabase are the
-first adapters, not the permanent boundary of the product.
-
-## AI-First Architecture
-
-Veyra uses AI where it improves understanding and planning, while deterministic
-code remains responsible for evidence, policy, execution, and final status.
-
-### 1. Observation Layer
-
-The observation layer records raw facts. It should avoid making broad security
-claims.
-
-Examples:
-
-- `orders` has no detected RLS enablement statement.
-- `/api/invoices/:id` reads an object by request id.
-- a route appears protected only in the frontend.
-- a scanner produced a redacted secret finding.
-- Lovable declared that the app has tenants, invoices, and admin users.
-
-Primary artifacts:
-
-- `scan-facts.json`
-- `declared-context.json`
-- scanner outputs
-- MCP context artifacts
-
-### 2. AI Inference Layer
-
-The inference layer reads observed facts and project context, then produces
-hypotheses.
-
-Examples:
-
-- this appears to be a multi-tenant invoicing app
-- invoices and payment methods look tenant-scoped
-- admin role changes look business-critical
-- this route may expose direct object access
-- this workflow needs a negative authorization test
-
-AI outputs are advisory and must include confidence, uncertainty, model id, and
-evidence references. They are not final findings.
-
-Primary artifacts:
-
-- `hypotheses.json`
-- `context-requests.json`
-- AI reasoning metadata
-
-### 3. Deterministic Assertion Layer
-
-The assertion layer turns facts and hypotheses into reviewed outcomes using
-fixed predicates, policies, and catalog rules.
-
-Examples:
-
-- does a route use `req.params.id` without an owner or tenant constraint?
-- does a sensitive table have RLS disabled?
-- does a policy grant all rows to `authenticated`?
-- does a finding have enough evidence to become a launch blocker?
-
-Only this layer computes:
-
-- `finding_type`
-- `evidence_strength`
-- `review_action`
-- `blast_radius`
-- `readiness_status`
-
-Primary artifacts:
-
-- `assertions.json`
-- `findings.json`
-- `control-cards.json`
-- `readiness-report.json`
-
-## Planning And Validation Flow
-
-AI can help plan the scan, but policy-gated code controls what actually runs.
+## How a scan works
 
 ```text
-Repository / Lovable / Supabase metadata
+orchestrator proposes the next tool call (or spawns a deep-dive sub-agent)
         |
         v
-Observation collectors
+deterministic policy gate authorizes it  (denies anything outside the allowlist / policy)
         |
         v
-AI product understanding + inference
+the tool runs; its result is parsed-or-rejected before it can persist
         |
         v
-Deterministic assertions
+repeat until a deterministic termination fires (done / budget / stall)
         |
         v
-AI security planner
-        |
-        v
-Policy compiler
-        |
-        v
-Read-only report or approved sandbox validation
+deterministic floor classifies facts into Findings, runs cleanup, authors the report
 ```
 
-The AI security planner may request more context, prioritize checks, and suggest
-test targets from the closed catalog. It must not hold credentials, call MCP
-tools directly, invent executable tests, or mutate systems.
+The orchestrator decides *what to check and in what order*. The deterministic
+floor decides *what is a finding* and *what blocks launch*. Those two
+responsibilities never mix.
 
-Connectors call Lovable and Supabase under policy. AI reads sanitized artifacts
-and may produce context requests. The policy layer decides whether those
-requests are allowed.
+## The orchestrator
 
-The mandatory baseline always runs. AI may add depth, priority, context, and
-planning, but it must not remove required checks silently.
+The orchestrator is Veyra's reasoning engine — the agent that runs the entire
+scan. It reads the app's code, schema, and metadata; builds a working
+understanding of what the app is (its entities, roles, tenant model, sensitive
+flows); and from that understanding decides, step by step, which tool to call
+next. It is not following a fixed checklist — it chooses the next action from
+the available tools based on everything it has learned so far in the scan, and
+it decides when the scan is done.
 
-## Trust Model
+Crucially, the orchestrator proposes; it does not act unilaterally. Every action
+it wants — read a file, query schema, run a scanner, fire a probe, spawn a
+sub-agent — is a *proposal* that the deterministic policy gate authorizes or
+denies before anything happens. The orchestrator never holds a credential, never
+classifies a finding, and never decides launch readiness; it directs the
+investigation, and the deterministic spine adjudicates and judges.
 
-Veyra should report which controls were checked, which evidence was found, which
-evidence was missing, and which areas need human review. It must not claim final
-assurance or compliance.
+## Sub-agents (bounded deep-dive)
 
-Veyra should not mutate production systems, change permissions, exfiltrate data,
+When a single target deserves deeper investigation than the main loop should
+spend inline — one table's full policy graph, one suspected IDOR across an actor
+pair — the orchestrator spawns a **deep-dive sub-agent** dedicated to that one
+target. The sub-agent investigates thoroughly, then returns its findings as
+facts to the orchestrator, which folds them into the rest of the scan.
+
+Sub-agents make the analysis deeper without making it less trustworthy, because
+each one is *more* constrained than the orchestrator, never less:
+
+- **Depth-1 only.** The orchestrator spawns sub-agents; a sub-agent cannot spawn
+  sub-agents. Enforced at the gate, not by convention — no runaway agent trees.
+- **One target each.** A sub-agent investigates exactly one declared target. No
+  fan-out, no wandering.
+- **Narrow tool subset.** A sub-agent sees only the tools relevant to its
+  target, derived deterministically and asserted to be a strict subset of what
+  the orchestrator could see. No new tool, and no broader capability, can enter
+  through a sub-agent.
+- **Budget debited from the parent.** A sub-agent spends from the scan's single
+  budget. It can end the scan if it exhausts the budget, but it can never extend
+  it.
+- **Same trust spine.** Every sub-agent tool call passes the same policy gate and
+  the same result-parse-or-reject boundary as the orchestrator. Sub-agents emit
+  facts only — they never classify, exactly like the orchestrator.
+- **Nested, auditable.** Every sub-agent step is logged with its `parent_step`
+  and a `subagent_id`, so an operator can reconstruct exactly which deep-dive
+  produced which piece of evidence.
+- **Failure-isolated.** A sub-agent that fails turns its target into a
+  `coverage_gap` and the orchestrator carries on — one deep-dive going wrong
+  never takes down the scan.
+
+This is deliberately *not* parallel fan-out and *not* a swarm of autonomous peer
+agents negotiating with each other — both make it hard to answer "which agent
+decided this, on what evidence," and a security tool whose findings must be
+defensible can't afford that. The shape is one orchestrator, bounded deep-dive
+sub-agents beneath it, and one deterministic trust spine that every agent —
+parent or sub — passes through.
+
+## Trust boundaries
+
+Veyra reports which controls were **checked**, which evidence was **found**,
+which evidence was **missing**, and which areas **need human review**. It does
+not claim final assurance or compliance, and never describes an app as
+"secure," "safe," or "compliant."
+
+Veyra does not mutate production systems, change permissions, exfiltrate data,
 auto-merge fixes, or make final security decisions.
 
-AI must not:
+**AI must not:**
 
-- classify findings as final authority
+- produce a Finding, or set `finding_type` / `evidence_strength` /
+  `review_action` / `blast_radius` / `readiness_status` (the deterministic floor
+  is the sole classifier — enforced by a tool-result schema that makes
+  classification keys un-representable, plus an import-graph guard that keeps the
+  `Finding` type unreachable from any tool)
 - decide launch readiness
-- execute code, SQL, shell commands, migrations, or MCP tools directly
-- invent active tests at runtime
-- hide uncertainty
+- call a tool the policy gate has not authorized, or any MCP method outside the
+  allowlist (denied methods have no tool descriptor — AI cannot even name them)
+- hold a raw secret, or see an unredacted tool result
+- author a write that the cleanup registry cannot reverse
+- terminate early to skip a baseline check (the required-evidence ledger turns a
+  missing baseline into a `coverage_gap`, deterministically)
 
-Deterministic code must:
+**Deterministic code must:**
 
-- enforce connector/tool policy
-- redact secrets before storage or AI use
-- keep raw user data out of AI prompts
-- compile executable plans from allowed actions only
-- preserve a complete report path when AI is disabled
+- enforce connector/tool policy on every call (the gate is the inner loop)
+- redact secrets before storage or AI use; gitleaks always runs with `--redact`
+- keep raw user data and raw secrets out of AI prompts, artifacts, and the audit
+  trail
+- own all classification and the readiness decision
+- track every write in a registry and reverse it at cleanup
+- preserve a complete report path when AI is disabled (`--no-ai` runs a
+  deterministic plan-walker over the same tools)
 
-## How AI fits in a Veyra scan
+## Operating modes (trust matrix)
 
-Veyra is **not** a wrapper around an LLM. It runs a scan as seven
-deliberate layers, three of which are AI; the other four are
-deterministic.
+| Mode | Credential ask | What AI may author | Writes? | Cleanup | `--no-ai` |
+|---|---|---|---|---|---|
+| A (read-only evidence) | project path; optional read-only MCP | which read tools to call, in what order | none | n/a | static plan-walker, full Findings |
+| **B.2 auto-synthesize (default Mode B)** | service-role key (env-only) | actor synthesis + read tools + probe request shapes within a typed schema | yes, registry-tracked (HTTP + Admin) | deterministic reverse-walk over both registries, `residual_count: 0` | read tools full Findings; write probes → `coverage_gap` |
+| B.1 manifest (opt-in) | sandbox + declared actors (no service-role key) | read tools + probe request shapes within a typed schema | yes, registry-tracked | deterministic reverse-walk over both registries | read tools full Findings; write probes → `coverage_gap` |
+| C (approved production) | reserved | reserved | reserved | reserved | reserved |
 
-- **Layer 1 — Bootstrap Inventory** (deterministic). Walks the local
-  project, optionally pulls MCP metadata, writes
-  `inventory-bootstrap.json`. Source of `observed_evidence`.
-- **Layer 1b — AI Product-Understanding** (AI, optional). Writes
-  `ai-declared-intent.json`. Never touches `observed_evidence`.
-- **Layer 1c — declared-context-builder** (deterministic composer).
-  Sole writer of `declared-context.json`, with field-by-owner
-  enforcement: the inventory owns `observed_evidence`, the AI artifact
-  owns `declared_intent`.
-- **Layer 2 — Observation Layer** (deterministic). Scanner adapters
-  (gitleaks, OSV, semgrep) emit `ScanFact[]` records; tool-runner
-  aggregates into `scan-facts.json`.
-- **Layer 3 — AI Inference Layer** (AI, optional). Reads
-  `scan-facts.json` + sanitized `declared-context.json`, produces
-  `Hypothesis[]` (must cite a fact_id). Never produces Findings.
-- **Layer 4 — Assertion Layer** (deterministic). Pass-1 predicates
-  emit `Finding[]` over `ScanFact[]` only; Pass-2 disposition attaches
-  hypotheses to findings or emits `AIConcern`.
-- **Layer 5 — AI Security Planner** (Phase 2, deferred).
+The default loop driver is **Anthropic via AWS Bedrock** (AWS credentials are
+env-only). Direct Anthropic and OpenAI remain selectable providers. Mode B's
+default is auto-synthesize (Veyra creates and cleans up its own test users);
+manifest mode is the opt-in for operators who prefer not to provide a
+service-role key. `--env production` with any active-validation mode is rejected.
 
-Four artifact types do not cross-pollute:
+## Audit
 
-- `ScanFact` — what we saw (no classification)
-- `Hypothesis` — what AI thinks about what we saw (cites a fact_id)
-- `Finding` — a deterministic verdict (AI never sets classification)
-- `AIConcern` — a hypothesis no predicate fired on (audit-only)
-
-AI is opt-in. The §12b matrix:
-
-- Passing no AI flag (with or without `ANTHROPIC_API_KEY` set in the
-  environment) → AI layers 1b, 3, 5 are skipped silently. Veyra
-  produces the deterministic baseline.
-- Passing `--ai-provider <name>` without the matching env var
-  (`ANTHROPIC_API_KEY` for anthropic) → CLI rejects at parse time
-  with an explicit error. Veyra never silently falls back.
-- Passing `--ai-provider <name>` with the env var set → AI is opted
-  in.
-- Passing `--no-ai` → hard override. Even when the provider flag and
-  env var are both present, AI layers 1b, 3, 5 do not run. The
-  AI-suggested areas tier is omitted entirely and the report says
-  "AI was disabled for this scan."
-
-In every case, the deterministic Findings set is the same — AI never
-deletes from the baseline.
-
-The Markdown report renders three distinct tiers: **Findings**
-(deterministic), **AI-suggested areas for human review** (AIConcerns
-at or above `--ai-concern-threshold`, default `medium`), and **Active
-validation outcomes** (Phase 2 placeholder). Tier mixing is forbidden.
-
-Full treatment with the §12b opt-in matrix, the ten trust-model
-constraints, and the per-agent dataflow lives in
-[`docs/how-ai-fits.md`](./docs/how-ai-fits.md).
+Every scan writes an append-only `loop-trace.jsonl`: one record per loop step
+with the model id, a prompt fingerprint, the policy and tool-descriptor snapshot
+hashes in force, the gate decision, the result-validation outcome, and the
+redacted result digest. An operator can read it top-to-bottom to reconstruct
+exactly which tools the AI chose, which the gate denied and why, which results
+were rejected, and which deep-dive produced which evidence — so every finding is
+defensible.
 
 ## Documentation
 
-- [`docs/phase-1.md`](./docs/phase-1.md) — Phase 1 overview, CLI flags,
-  how to run a scan, how to read the report, known limits.
-- [`docs/lovable.md`](./docs/lovable.md) — how Veyra reads Lovable code
-  in Phase 1 (local git clone) and why `--lovable-mcp` is deferred to
-  step 28.
-- [`docs/lovable-mcp-safety.md`](./docs/lovable-mcp-safety.md) — Lovable
-  MCP allowlist + fixed prompt templates (historical; the flag is
-  deferred as of step 27).
-- [`docs/supabase-metadata-export.md`](./docs/supabase-metadata-export.md)
-  — what Supabase metadata Veyra reads. As of step 27 the customer
-  default is the Supabase Management REST API (`--supabase
-  <project_ref>`); contributor-only paths (`--dev-supabase-schema`,
-  `--dev-supabase-backend supabase-mcp`) are documented behind
-  `VEYRA_DEV=1`.
-- [`docs/data-access-and-trust.md`](./docs/data-access-and-trust.md) —
-  the trust model in plain language, with non-goals.
-- [`docs/how-ai-fits.md`](./docs/how-ai-fits.md) — the seven-layer
-  architecture, the four artifact types, the §12b opt-in matrix, and
-  the ten trust-model constraints.
-- [`phases/phase-1/decisions.md`](./phases/phase-1/decisions.md) —
-  material architectural decisions made during Phase 1 implementation
-  (currently: step 27 REST-default course-correction).
-- [`docs/active-validation.md`](./docs/active-validation.md) — Phase 2
-  active validation: Mode A vs Mode B, sub-mode B.1 (manifest) vs
-  B.2 (auto-synthesize), what's checked, what's never done.
+- [`docs/phase-1.md`](./docs/phase-1.md) — Phase 1 overview, CLI flags, how to
+  run a scan, how to read the report, known limits (the shipped baseline).
+- [`docs/lovable.md`](./docs/lovable.md) — how Veyra reads Lovable code today
+  (local git clone) and why native Lovable fetch is deferred.
+- [`docs/supabase-metadata-export.md`](./docs/supabase-metadata-export.md) — the
+  Supabase Management REST API is the customer default (`--supabase
+  <project_ref>`); contributor-only paths sit behind `VEYRA_DEV=1`.
+- [`docs/data-access-and-trust.md`](./docs/data-access-and-trust.md) — the trust
+  model in plain language, with non-goals.
+- [`docs/active-validation.md`](./docs/active-validation.md) — Phase 2 active
+  validation: Mode A vs Mode B, sub-mode B.1 vs B.2, what's checked, what's never
+  done.
 - [`docs/synthetic-data-and-cleanup.md`](./docs/synthetic-data-and-cleanup.md) —
-  Phase 2 synthetic-data lifecycle, cleanup contract, bounded auto-retry
-  semantics.
-- [`docs/ai-explanations.md`](./docs/ai-explanations.md) — Phase 2 AI
-  explainer: advisory only (never classifies, never decides), opt-in
-  matrix, confidence threshold.
-- [`docs/approval-flow.md`](./docs/approval-flow.md) — Phase 2 Mode B
-  approval flow: interactive prompt, CI signed approval file,
-  approval-file format + gates.
-- [`phases/phase-2/decisions.md`](./phases/phase-2/decisions.md) — Phase 2
-  blocking decisions (locked in step 2.01).
+  Phase 2 synthetic-data lifecycle, cleanup contract.
+- [`docs/approval-flow.md`](./docs/approval-flow.md) — Phase 2 Mode B approval
+  flow.
+- [`docs/how-ai-fits.md`](./docs/how-ai-fits.md) — how the AI orchestrator,
+  the gate, and the deterministic floor fit together in a scan.
 
 ## Development
 

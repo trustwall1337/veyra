@@ -9,15 +9,18 @@ The user has asked you to do work that's pre-specified in a step file. Your job 
 
 ## 1. Find the step file
 
-Parse `$ARGUMENTS` as `<phase>.<step>` (e.g. `2.01`, `2.07b`). If no dot is present, default phase to `1` (so legacy invocations like `/step 03b` still resolve to Phase 1).
+Parse `$ARGUMENTS` as `<phase>.<step>` (e.g. `2.01`, `2.07b`, `3.30`). If no dot is present, default phase to `1` (so legacy invocations like `/step 03b` still resolve to Phase 1).
 
-- `<phase>` must be `1` or `2`. Any other value → stop and tell the user.
-- `<step>` is the step identifier as it appears in the filename prefix: numeric (`01`, `02`), with an optional letter suffix (`02b`, `08c`, `10a`, `10e`). Zero-pad numeric values to two digits.
+- `<phase>` must be `1`, `2`, or `3`. Any other value → stop and tell the user.
+- `<step>` is the step identifier as it appears in the filename prefix: numeric (`01`, `02`, `30`), with an optional letter suffix (`02b`, `08c`, `10a`, `31b`, `31c`, `40b`). Zero-pad numeric values to two digits ONLY for phases 1 and 2 (their files are zero-padded, e.g. `01-`); phase 3 step files are NOT zero-padded (`30-`, `31-`, `31b-`), so use the number as written.
+- **Phase folder mapping:** phase `1` → `phases/phase-1/steps/`; phase `2` → `phases/phase-2/steps/`; phase `3` → `phases/phase-2-improvement/steps/` (the "Agentic Veyra" phase — note the folder is `phase-2-improvement`, not `phase-3`).
 
 Look up the matching file:
 
 ```
-phases/phase-<phase>/steps/<step>-*.md
+phase 1: phases/phase-1/steps/<step>-*.md
+phase 2: phases/phase-2/steps/<step>-*.md
+phase 3: phases/phase-2-improvement/steps/<step>-*.md
 ```
 
 Examples:
@@ -26,6 +29,11 @@ Examples:
 - `/step 2.01` → `phases/phase-2/steps/01-*.md`
 - `/step 2.07b` → `phases/phase-2/steps/07b-*.md`
 - `/step 2.10a` → `phases/phase-2/steps/10a-*.md`
+- `/step 3.30` → `phases/phase-2-improvement/steps/30-*.md`
+- `/step 3.31b` → `phases/phase-2-improvement/steps/31b-*.md`
+- `/step 3.40b` → `phases/phase-2-improvement/steps/40b-*.md`
+
+For phase 3, `Maps to:` references `phases/phase-2-improvement/PLAN.md` (+ `decisions.md`) instead of `PHASE_1_PLAN.md`.
 
 If no file matches, stop and tell the user — do not guess. If multiple match (shouldn't happen given the naming convention), stop and ask the user to disambiguate.
 
