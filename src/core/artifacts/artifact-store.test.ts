@@ -4,6 +4,7 @@ import * as path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import type { ArtifactKind } from '../../types/artifact.js';
 import type { Finding } from '../../types/finding.js';
 import { isErr, isOk } from '../../types/result.js';
 
@@ -57,5 +58,27 @@ describe('artifact-store', () => {
 
     const b = await store.write('scan-x', 'declared_context', { v: 2 });
     expect(isErr(b)).toBe(true);
+  });
+
+  it('maps each Phase 3 additive ArtifactKind to its on-disk basename (step 30)', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'veyra-store-p3-'));
+    const store = createFsArtifactStore(root);
+
+    const expected: ReadonlyArray<readonly [ArtifactKind, string]> = [
+      ['loop_trace', 'loop-trace.jsonl'],
+      ['tool_error', 'tool-error.json'],
+      ['tool_result_reject', 'tool-result-reject.json'],
+      ['required_evidence_ledger', 'required-evidence-ledger.json'],
+      ['redaction_alias_map', 'redaction-alias-map.json'],
+      ['subagent_error', 'subagent-error.json'],
+    ];
+
+    for (const [kind, basename] of expected) {
+      const r = await store.write('scan-p3', kind, { ok: true });
+      if (isErr(r)) {
+        throw new Error(`write failed for ${kind}: ${r.error.message}`);
+      }
+      expect(path.basename(r.value.path)).toBe(basename);
+    }
   });
 });

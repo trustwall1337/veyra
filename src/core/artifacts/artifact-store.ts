@@ -47,6 +47,22 @@ function basenameFor(kind: ArtifactKind): string {
       return 'hypotheses.json';
     case 'context_requests':
       return 'context-requests.json';
+    // Phase 3 (Agentic Veyra) additive kinds — step 30. `loop_trace` is the
+    // append-only per-step audit stream, hence `.jsonl` (its real per-step
+    // writer lands in step 34; this is only the filename mapping). The rest
+    // are single JSON records.
+    case 'loop_trace':
+      return 'loop-trace.jsonl';
+    case 'tool_error':
+      return 'tool-error.json';
+    case 'tool_result_reject':
+      return 'tool-result-reject.json';
+    case 'required_evidence_ledger':
+      return 'required-evidence-ledger.json';
+    case 'redaction_alias_map':
+      return 'redaction-alias-map.json';
+    case 'subagent_error':
+      return 'subagent-error.json';
   }
 }
 
