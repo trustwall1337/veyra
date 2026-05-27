@@ -11,7 +11,18 @@ export type ArtifactKind =
   | 'context_requests'
   | 'control_cards'
   | 'veyra_report_json'
-  | 'veyra_report_md';
+  | 'veyra_report_md'
+  // Phase 3 (Agentic Veyra) additive kinds — PLAN §F/§K + step 30. The loop's
+  // append-only audit trail, the per-tool failure + result-reject records, the
+  // checked-in required-evidence ledger, the redaction alias map, and the
+  // bounded deep-dive sub-agent error record (decisions.md D6). Additive only:
+  // no existing kind is renamed or removed.
+  | 'loop_trace'
+  | 'tool_error'
+  | 'tool_result_reject'
+  | 'required_evidence_ledger'
+  | 'redaction_alias_map'
+  | 'subagent_error';
 
 export interface ArtifactRef<K extends ArtifactKind = ArtifactKind> {
   readonly scanId: string;
