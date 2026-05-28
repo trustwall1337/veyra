@@ -29,8 +29,10 @@ coverage/
 .claude/review-runs/
 .claude/plans/
 
-# Phases
-phases/
+# Phases are tracked (per CLAUDE.md: planning docs live in the repo so
+# contributors see the constraints behind each change). Only per-run scratch
+# under phases/ is ignored.
+phases/**/.veyra/
 
 # Veyra scan output (per-scan artifact directories + ad-hoc test reports).
 # `.veyra/scans/` is created by `pnpm dev -- scan` against any project;

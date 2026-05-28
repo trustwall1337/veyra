@@ -1,0 +1,18 @@
+# Keep the build context small + never ship local state or secrets into layers.
+.git
+node_modules
+dist
+.veyra
+**/.veyra
+examples/**/.veyra
+fixture-report.md
+*.log
+.env
+.env.*
+phases
+docs
+*.md
+!README.md
+.claude
+coverage
+.DS_Store

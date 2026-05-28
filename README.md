@@ -108,6 +108,70 @@ defensible can't afford that. The shape is one orchestrator, bounded deep-dive
 sub-agents beneath it, and one deterministic trust spine that every agent —
 parent or sub — passes through.
 
+## The tool catalog (what the orchestrator can do)
+
+The orchestrator and its sub-agents act only through a fixed catalog of typed
+tools. This is the complete action surface — the AI cannot do anything not on
+this list, and the policy gate authorizes every call before it runs.
+
+**Read-only (all modes):**
+
+- `run-gitleaks` / `run-osv` / `run-semgrep` — secret, dependency, and
+  code-pattern scanners (gitleaks always runs with `--redact`).
+- `read-schema` — Supabase tables, RLS state, policies, extensions, migrations,
+  and advisor findings (Supabase Management REST API / allowlisted MCP read
+  methods: `list_tables`, `list_extensions`, `list_migrations`, `get_advisors`).
+- `read-storage-meta` — Supabase storage buckets + storage config
+  (`list_storage_buckets`, `get_storage_config`).
+- `read-edge-function` — Supabase edge-function code (`list_edge_functions`,
+  `get_edge_function`).
+- `read-logs` — Supabase application logs (`get_logs`).
+- `list-files` / `read-file` / `get-diff` — read project code (local clone, or
+  Lovable MCP read methods: `get_project`, `list_files`, `read_file`,
+  `list_edits`, `get_diff`).
+
+**Active validation (Mode B only, behind approval + sandbox):**
+
+- `establish-actor-session` — sign in as a test actor.
+- `synthesize-actors` / `read-actor-manifest` — obtain the test identities
+  (auto-synthesized by default, or operator-declared manifest).
+- `probe-http` — fire an authorization probe whose request shape the AI authors
+  within a typed schema, executed through the cleanup-tracked write registry.
+
+**MCP tools are allowlist-derived.** Every Supabase and Lovable tool is generated
+mechanically from the connector allowlists, so a method that isn't allowlisted
+(`execute_sql`, migrations applied, deploys, mutations) has no tool descriptor —
+the AI cannot name it, let alone call it. Every Supabase call carries
+`read_only=true` + a `project_ref`.
+
+**No tool classifies.** Tools emit facts only. Turning facts into Findings, and
+deciding launch readiness, is the deterministic floor's job alone.
+
+### Pending tools (the architecture is built to accept these)
+
+Veyra's tool catalog is open-extension by design — a new tool is a new folder
+plus a registry entry, never a change to the core. The catalog grows toward:
+
+- **An Anthropic security-reasoning agent** (exploratory) — an AI
+  security-analysis capability invoked as a tool under the same policy gate and
+  result boundary as every other tool. It would emit facts and hypotheses, never
+  Findings — the deterministic floor still classifies.
+- **More code hosts** — GitHub, GitLab, Bitbucket (read repository contents
+  beyond a local clone), plus a GitHub Action companion mode.
+- **More API surfaces** — GraphQL (schema introspection + resolver analysis),
+  gRPC, REST, tRPC authorization probing.
+- **More identity providers** — Clerk, Auth0, Cognito, Firebase Auth, Okta,
+  workspace SSO — beyond Supabase Auth.
+- **More storage and data layers** — S3, R2, GCS, Azure Blob; other databases.
+- **Infrastructure-as-code** — Terraform, Pulumi, CloudFormation drift and
+  least-privilege checks.
+- **CI/CD evidence** — GitHub Actions, GitLab CI, and similar build provenance.
+
+Each pending tool enters the same way: a typed descriptor, an allowlist if it
+talks to an external service, a policy-gated `invoke`, and a result that emits
+facts only. Adding one never widens what AI may decide — only what evidence it
+can gather.
+
 ## Trust boundaries
 
 Veyra reports which controls were **checked**, which evidence was **found**,
@@ -189,6 +253,57 @@ defensible.
   flow.
 - [`docs/how-ai-fits.md`](./docs/how-ai-fits.md) — how the AI orchestrator,
   the gate, and the deterministic floor fit together in a scan.
+
+## Quick start
+
+Veyra is a CLI. You give it a project to scan and the credentials for the
+checks you want; it produces a report. Two ways to run it.
+
+### Docker (recommended)
+
+The image bundles the scanner binaries (gitleaks, osv-scanner, semgrep) so you
+need nothing on the host but Docker.
+
+```bash
+cp .env.example .env        # fill in SUPABASE_ACCESS_TOKEN + AWS_* (Bedrock driver)
+mkdir -p target out         # put the app to scan in ./target; reports land in ./out
+
+# Read-only scan (Mode A) of your app's code + Supabase config:
+docker compose run --rm veyra \
+  scan --project /scan --supabase <project_ref> --out /out/report.md
+
+# Active validation (Mode B, sandbox only): add the service-role key to .env,
+# then approve active testing and point at the sandbox project:
+docker compose run --rm veyra \
+  scan --project /scan --supabase-sandbox <project_ref> \
+       --mode sandbox_active_validation --env sandbox --approve-active \
+       --out /out/report.md
+```
+
+The project is mounted read-only; Veyra never mutates your source. `--env
+production` with any active mode is rejected.
+
+### Local (Node 22 + pnpm)
+
+```bash
+pnpm install
+pnpm build
+export SUPABASE_ACCESS_TOKEN=...           # read-only Supabase reads
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=...   # Bedrock driver
+node dist/cli/index.js scan --project ./my-app --supabase <project_ref> --out report.md
+```
+
+Scanner binaries (`gitleaks`, `osv-scanner`, `semgrep`) must be on `PATH` for
+the local path; controls whose scanner is missing surface as `coverage_gap`,
+never a silent skip.
+
+### What you get back
+
+A report with: an AI-authored summary of what your app is and its top risks in
+priority order; per-control evidence (checked / found / missing / appears
+launch-blocking / needs human review); active-validation outcomes (Mode B); and
+an honest list of what couldn't be checked. Plus a `loop-trace.jsonl` audit you
+can read to reconstruct every decision.
 
 ## Development
 

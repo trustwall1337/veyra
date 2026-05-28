@@ -1,0 +1,35 @@
+# Veyra via Docker Compose.
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in the credentials you need
+#      (SUPABASE_ACCESS_TOKEN for read-only scans; AWS_* for the Bedrock loop
+#      driver; service-role key only for Mode B auto-synthesize).
+#   2. Put the project you want to scan at ./target (or change the bind mount).
+#   3. Run:
+#        docker compose run --rm veyra scan --project /scan --supabase <project_ref> --out /out/report.md
+#
+# The project is mounted read-only; reports are written to ./out on the host.
+
+services:
+  veyra:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: veyra:local
+    # Credentials come from .env — never bake them into the image or commit them.
+    env_file:
+      - .env
+    volumes:
+      # The app under analysis (read-only — Veyra never mutates the source).
+      - ./target:/scan:ro
+      # Report + artifact output (the only writable host path).
+      - ./out:/out
+    # Default to the help banner; override on the command line, e.g.
+    #   docker compose run --rm veyra scan --project /scan --supabase <ref> --out /out/report.md
+    command: ["--help"]
+    # No inbound network service; Veyra is a CLI. Outbound only (Supabase REST,
+    # Bedrock, scanner DBs). Drop all Linux capabilities — it needs none.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
