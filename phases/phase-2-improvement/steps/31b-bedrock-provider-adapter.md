@@ -1,6 +1,6 @@
 # Step 31b — AWS Bedrock provider adapter (loop driver default, per D4)
 
-**Status:** not started
+**Status:** done (2026-05-28) — auth (env-only), opaque ProviderId, provider + AiDriver, recorded-fixture transport, live transport stub (env-gated skip) landed; live AWS SDK wiring + a real Bedrock recording are a follow-up (needs AWS creds I do not have)
 **Maps to:** `PLAN.md §H` Step 31b, `decisions.md` D4
 **Phase:** 3, Cut 1
 **Produces:** `src/ai/bedrock/` — a new `bedrock` provider adapter behind the existing provider-agnostic `AiProvider`/`AiDriver` interface. One folder; opaque `ProviderId`; no closed provider union (FPP §2A).

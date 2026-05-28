@@ -85,9 +85,17 @@ export function containsClassificationKey(value: unknown): boolean {
     return value.some((item) => containsClassificationKey(item));
   }
   if (value !== null && typeof value === 'object') {
-    for (const [key, nested] of Object.entries(value)) {
+    const obj = value as Record<string, unknown>;
+    for (const [key, nested] of Object.entries(obj)) {
       if (CLASSIFICATION_KEY_SET.has(key)) return true;
       if (containsClassificationKey(nested)) return true;
+    }
+    // codex p3-r1-004: a NamedFact-shaped object can smuggle a classification
+    // discriminator via its `name` value (e.g. `{name:'finding_type', value:'x'}`)
+    // even though `name` and `value` are not classification keys themselves.
+    // Reject when `name` is a string matching the classification key set.
+    if (typeof obj['name'] === 'string' && CLASSIFICATION_KEY_SET.has(obj['name'])) {
+      return true;
     }
   }
   return false;
@@ -112,7 +120,16 @@ const factValueSchema: z.ZodType<FactValue> = z.lazy(() =>
 
 const namedFactSchema: z.ZodType<NamedFact> = z.lazy(() =>
   z.strictObject({
-    name: z.string(),
+    // codex p3-r1-004 belt-and-suspenders: reject when `name` is a
+    // classification key string, so a fact named `finding_type` cannot smuggle
+    // a verdict through the loop boundary even though `name` is not itself a
+    // classification key.
+    name: z
+      .string()
+      .refine(
+        (n) => !CLASSIFICATION_KEY_SET.has(n),
+        { message: 'NamedFact.name must not be a classification key' },
+      ),
     value: factValueSchema,
   }),
 );
@@ -132,3 +149,14 @@ export const toolResultBaseSchema = z
     message:
       'tool result must not carry a classification key (finding_type/review_action/evidence_strength/blast_radius/reproducibility) at any depth',
   });
+
+/**
+ * The base schema typed as `ZodType<ToolResult>` so a concrete tool's
+ * `result_schema` (Step 33) composes it without a per-site cast. The single
+ * `as unknown as` here is the contained cost of `.refine()` widening the
+ * inferred type away from the `ToolResult` interface; behaviour is identical to
+ * {@link toolResultBaseSchema}. (Resolves the step-30 review note that deferred
+ * a typed helper to Step 33.)
+ */
+export const toolResultSchema: z.ZodType<ToolResult> =
+  toolResultBaseSchema as unknown as z.ZodType<ToolResult>;

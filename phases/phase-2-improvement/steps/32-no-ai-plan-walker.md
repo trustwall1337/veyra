@@ -1,6 +1,6 @@
 # Step 32 — `--no-ai` deterministic plan-walker over the same tool catalog
 
-**Status:** not started
+**Status:** done (2026-05-28)
 **Maps to:** `PLAN.md §E` (`--no-ai`, option b), `decisions.md` D5
 **Phase:** 3, Cut 1
 **Produces:** `src/core/orchestrator/plan-walker.ts` — a deterministic driver that invokes the SAME tool catalog in fixed dependency order (replaces the AI loop driver under `--no-ai`); replaces the deprecated `ai-security-planner` deterministic-fallback role.

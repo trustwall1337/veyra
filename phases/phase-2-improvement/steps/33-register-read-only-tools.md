@@ -1,6 +1,6 @@
 # Step 33 — Concrete read-only tool descriptors in leaf folders + non-core registration
 
-**Status:** not started
+**Status:** done (2026-05-28)
 **Maps to:** `PLAN.md §C` (tool catalog + placement rule), `§D.5` (allowlist-derived MCP descriptors)
 **Phase:** 3, Cut 1
 **Produces:** concrete read-only `ToolDescriptor`s in leaf folders — `src/scanners/*/tool.ts` (gitleaks/osv/semgrep), `src/connectors/supabase/tools/*` + `src/connectors/lovable/tools/*` (per allowlisted MCP method), `src/agents/*/tools/*` (read-file, read-schema decomposed from agents); `src/cli/tool-registration.ts` (non-core wiring layer — successor to `agent-registration.ts`).

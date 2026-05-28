@@ -1,6 +1,6 @@
 # Step 39 — Probe-primitive split: AI-authored request shapes within `requestSchema`
 
-**Status:** not started
+**Status:** done (2026-05-28) — probe-primitive substrate (RequestSchema with aiAuthored/fixed markers), compiler (rejects fixed-override, off-schema params, body-injection), outcome classifier (deterministic, joins the floor), and a sample IDOR probe + tests landed; full 13-entry catalog migration is deferred (canonical pattern + sample shipped)
 **Maps to:** `PLAN.md §C` (probe primitives), Directive 1 (AI authors method/URL/body), carries PLAN-v1 §D.F
 **Phase:** 3, Cut 3
 **Produces:** the 13 sandbox-runner catalog entries split into (i) a `probe-http` tool whose `requestSchema` declares which fields AI may author vs which are fixed, and (ii) a deterministic outcome-classifier predicate (joins the floor). All writes via Step 38's `executeWriteWithRegistry()`.

@@ -1,6 +1,10 @@
 import type { ArtifactRef } from './artifact.js';
 import type { Finding } from './finding.js';
-import type { ValidationPolicy } from './validation-policy.js';
+
+// Runtime context types live in `agent-context.ts` — split from this file in
+// Step 35 so the policy/executor type chain (consumed by scanner adapters) does
+// NOT transitively reach `Finding`. Re-exported here for backward compatibility.
+export type { AgentExecutionContext, AgentLogger } from './agent-context.js';
 
 export interface AgentMetadata {
   readonly id: string;
@@ -25,21 +29,6 @@ export interface AgentMetadata {
   readonly produces?: readonly string[];
 }
 
-export interface AgentLogger {
-  debug(message: string, fields?: Record<string, unknown>): void;
-  info(message: string, fields?: Record<string, unknown>): void;
-  warn(message: string, fields?: Record<string, unknown>): void;
-  error(message: string, fields?: Record<string, unknown>): void;
-}
-
-export interface AgentExecutionContext {
-  readonly scanId: string;
-  readonly projectRoot: string;
-  readonly artifactDir: string;
-  readonly policy: ValidationPolicy;
-  readonly logger: AgentLogger;
-}
-
 export type AgentStatus = 'completed' | 'skipped' | 'failed';
 
 export interface AgentResult<O> {
@@ -51,6 +40,10 @@ export interface AgentResult<O> {
 }
 
 export interface VeyraAgent<I, O> {
+  // Imported via the re-export above so this module's types still resolve.
   readonly metadata: AgentMetadata;
-  run(input: I, context: AgentExecutionContext): Promise<AgentResult<O>>;
+  run(
+    input: I,
+    context: import('./agent-context.js').AgentExecutionContext,
+  ): Promise<AgentResult<O>>;
 }
