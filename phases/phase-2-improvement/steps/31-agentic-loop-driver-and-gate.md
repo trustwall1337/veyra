@@ -1,6 +1,6 @@
 # Step 31 — Agentic loop driver + policy gate inner step + budget caps + per-tool + result boundaries
 
-**Status:** not started
+**Status:** done (2026-05-27)
 **Maps to:** `PLAN.md §B` (loop), `§D.1` (result boundary), `§E` (budget/termination), `§K` (ledger eval at done)
 **Phase:** 3, Cut 1
 **Produces:** `src/core/orchestrator/agentic-loop.ts` (replaces `scan-orchestrator.ts` as runtime entry; provider-agnostic `AiDriver`/`AiProvider` interface, no provider import here), `src/core/orchestrator/required-evidence-ledger.ts` (consumed; defined per §K — may co-land or depend on a sibling step).

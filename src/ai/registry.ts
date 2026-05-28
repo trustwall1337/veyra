@@ -17,7 +17,19 @@
 import { asProviderId, type ProviderId } from '../types/identity.js';
 
 export type ProviderAvailability =
-  | { readonly kind: 'available'; readonly envVarName: string }
+  | {
+      readonly kind: 'available';
+      readonly envVarName: string;
+      /**
+       * Additional env vars whose presence is ALSO required for opt-in.
+       * codex p3-r2-002: Bedrock needs the full AWS triple
+       * (`AWS_SECRET_ACCESS_KEY` + `AWS_REGION`/`AWS_DEFAULT_REGION`), not
+       * just `AWS_ACCESS_KEY_ID`. Each entry is `string` (single var) or a
+       * `readonly string[]` (any-of group — the CLI accepts if at least one
+       * is set).
+       */
+      readonly requiresAdditionalEnv?: ReadonlyArray<string | readonly string[]>;
+    }
   | { readonly kind: 'deferred'; readonly deferredMessage: string };
 
 export interface ProviderEntry {
@@ -62,6 +74,21 @@ function buildDefaultProviderEntries(): readonly ProviderEntry[] {
       availability: {
         kind: 'available',
         envVarName: 'OPENAI_API_KEY',
+      },
+    },
+    {
+      // codex p3-r1-010 / p3-r2-002 / decisions.md D4: Bedrock is the Phase-3
+      // default loop driver. Auth is env-only; the full triple is required.
+      // The live SDK transport is wired in a follow-up; `auth.ts` does the
+      // hard check at runtime.
+      id: brandOrThrow('bedrock'),
+      availability: {
+        kind: 'available',
+        envVarName: 'AWS_ACCESS_KEY_ID',
+        requiresAdditionalEnv: [
+          'AWS_SECRET_ACCESS_KEY',
+          ['AWS_REGION', 'AWS_DEFAULT_REGION'],
+        ],
       },
     },
   ];

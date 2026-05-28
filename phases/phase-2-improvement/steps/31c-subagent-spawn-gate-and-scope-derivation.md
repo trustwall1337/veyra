@@ -1,6 +1,6 @@
 # Step 31c — Sub-agent spawn gate + sub-scope derivation (D6 deep-dive)
 
-**Status:** not started
+**Status:** done (2026-05-28)
 **Maps to:** `PLAN.md §O` (deep-dive sub-agents), `decisions.md` D6
 **Phase:** 3, Cut 1 (last item before 41-partial)
 **Produces:** `policyGate.authorizeSpawn(proposal, policy, state, depth)` in `src/core/policy/` (the spawn-authorization half: depth-cap + policy + `TargetDescriptor` validation) + `deriveSubScope(target, parentScope, policy)` in `src/core/orchestrator/` (the scope-derivation half; reads only the catalog *contract*, so `src/core` stays import-clean).

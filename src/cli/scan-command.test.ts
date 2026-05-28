@@ -705,7 +705,9 @@ describe('validateScanOptions — §12b opt-in matrix', () => {
       envReader: fakeEnv({}),
     });
     const result = await validateScanOptions(
-      baseOptions({ aiProvider: 'bedrock', ai: false }),
+      // bedrock IS registered (Phase 3 / D4) — use a definitively-unknown id
+      // for the typo-guard test.
+      baseOptions({ aiProvider: 'frobnicate', ai: false }),
       deps,
     );
     expect(isErr(result)).toBe(true);
@@ -748,13 +750,14 @@ describe('validateScanOptions — §12b opt-in matrix', () => {
   it('rejects --ai-provider with an unknown provider id', async () => {
     const deps = makeDeps({ stat: fakeStat({ '/proj': 'dir' }) });
     const result = await validateScanOptions(
-      baseOptions({ aiProvider: 'bedrock' }),
+      // bedrock IS registered (Phase 3 / D4); use a guaranteed-unknown id here.
+      baseOptions({ aiProvider: 'frobnicate' }),
       deps,
     );
     expect(isErr(result)).toBe(true);
     if (isErr(result)) {
       expect(result.error.message).toContain('not a registered provider');
-      expect(result.error.message).toContain('bedrock');
+      expect(result.error.message).toContain('frobnicate');
     }
   });
 });

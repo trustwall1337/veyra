@@ -13,11 +13,13 @@ import {
   createScanOrchestrator,
   type ScanOrchestrator,
 } from '../core/orchestrator/scan-orchestrator.js';
+import { runAgenticLoop } from '../core/orchestrator/agentic-loop.js';
 import {
   bundledRulesDir,
   discoverLockfile,
   registerPhase1Agents,
 } from './agent-registration.js';
+import { registerReadOnlyTools } from './tool-registration.js';
 import type { AgentExecutionContext, AgentLogger } from '../types/agent.js';
 import type { ProviderId } from '../types/identity.js';
 import { type Result, err, ok } from '../types/result.js';
@@ -220,6 +222,20 @@ export interface StatLike {
 export interface ScanCommandDeps {
   readonly stat: (p: string) => Promise<StatLike>;
   readonly orchestratorFactory: () => ScanOrchestrator;
+  /**
+   * Step 40b seam (PLAN §G.1): the agentic-loop entry that replaces the
+   * topo-sort orchestrator. Injected so the fake-runner test seam is
+   * preserved (no circular dep — codex r2 confirmed). Step 40 wires the CLI
+   * to actually invoke this; here it is added to the deps so the migration
+   * is no longer a breaking change.
+   */
+  readonly loopFactory?: typeof runAgenticLoop;
+  /**
+   * Step 40b seam (PLAN §G.1, §C placement rule): the read-only tool
+   * registration that builds the catalog the loop drives. Step 33's
+   * `registerReadOnlyTools`. Optional / defaulted via `defaultScanCommandDeps`.
+   */
+  readonly registerTools?: typeof registerReadOnlyTools;
   readonly policyFactory: (env: EnvironmentType) => ValidationPolicy;
   readonly logger: AgentLogger;
   readonly now: () => Date;
@@ -605,6 +621,38 @@ function validateAiOptions(
           `--ai-provider ${options.aiProvider}: ${entry.availability.envVarName} not set (AI opt-in requires both --ai-provider and the corresponding env var)`,
         ),
       );
+    }
+    // codex p3-r2-002: providers that need a multi-env credential set (e.g.
+    // Bedrock: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_REGION) declare
+    // them via `requiresAdditionalEnv`. Each entry is either a single var name
+    // (required) or a list (any-of). The runtime auth path validates the same
+    // set; this is a CLI fail-closed early reject.
+    if (entry.availability.requiresAdditionalEnv !== undefined) {
+      for (const required of entry.availability.requiresAdditionalEnv) {
+        if (typeof required === 'string') {
+          const v = deps.envReader(required);
+          if (v === undefined || v.length === 0) {
+            return err(
+              new CliUsageError(
+                `--ai-provider ${options.aiProvider}: ${required} not set (AI opt-in requires the full credential set)`,
+              ),
+            );
+          }
+        } else {
+          // any-of group
+          const someSet = required.some((name) => {
+            const v = deps.envReader(name);
+            return v !== undefined && v.length > 0;
+          });
+          if (!someSet) {
+            return err(
+              new CliUsageError(
+                `--ai-provider ${options.aiProvider}: one of ${required.join('/')} must be set (AI opt-in requires the full credential set)`,
+              ),
+            );
+          }
+        }
+      }
     }
     return ok({
       aiDisabled: false,
@@ -1226,6 +1274,8 @@ export function defaultScanCommandDeps(): ScanCommandDeps {
   return {
     stat: (p) => fs.stat(p),
     orchestratorFactory: createScanOrchestrator,
+    loopFactory: runAgenticLoop,
+    registerTools: registerReadOnlyTools,
     policyFactory: defaultReadOnlyEvidencePolicy,
     logger: defaultConsoleLogger,
     now: () => new Date(),

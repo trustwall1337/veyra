@@ -1,6 +1,6 @@
 # Step 41 — Agentic fixture gate: e2e + determinism + trust-invariant assertions
 
-**Status:** not started
+**Status:** done (2026-05-28) — agentic fixture gate landed: gates 1 (e2e), 2 (determinism), 3 (per-tool failure boundary), 4 (result-reject), 5 (ledger row-count pin), 6 (write-then-cleanup roundtrip + cleanup_failed), 7 (trust invariants — no raw secret in trace), 8 (D6 depth cap, no subagent_depth>1) all pass; 10 tests in agentic-fixture-gate.test.ts; live AI-driver smoke + recorded-from-real fixture snapshot deferred (needs live AWS Bedrock recording).
 **Maps to:** `PLAN.md §H` Step 41, `§K` (ledger), `§D` (trust invariants)
 **Phase:** 3 (Cut 1 partial; Cut 3 complete)
 **Produces:** the Phase 3 acceptance gate — extends the fixture suite to run the full agentic pipeline and assert every trust invariant mechanically.

@@ -1,4 +1,4 @@
-import type { AgentExecutionContext } from '../../../types/agent.js';
+import type { AgentExecutionContext } from '../../../types/agent-context.js';
 import type { ConnectorId } from '../../../types/identity.js';
 import type { Result } from '../../../types/result.js';
 import type {
