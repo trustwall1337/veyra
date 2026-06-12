@@ -10,8 +10,8 @@ import {
 import { predicatesBusinessLogic } from '../agents/business-logic/predicates.js';
 import {
   classifyProbe,
-  findingForOutcome,
   type ProbeObservation,
+  type ProbeOutcome,
 } from '../agents/sandbox-runner/outcome-classifier.js';
 import {
   predicateAllAuthenticated,
@@ -122,7 +122,25 @@ export const FLOOR_PREDICATES: readonly FloorPredicate[] = [
     // expect_allow → proven_denial = likely_issue availability; inconclusive =
     // coverage_gap). `proven_denial` when denial was expected → NO finding.
     predicate_id: 'active-validation-probe-outcomes',
-    control_ids: ['cc-11-3'],
+    // Step 39b: extended from ['cc-11-3'] (40c-v3 scope) to all 13 migrated
+    // probe control_ids. The predicate body iterates probe_response ScanFacts
+    // and routes per-control via `renderProbeFinding` (codex 39b-007 [APPLIED]
+    // — the renderer moved here from outcome-classifier.ts so the sandbox-
+    // runner stays Finding-free).
+    control_ids: [
+      'cc-11-1',
+      'cc-11-2',
+      'cc-11-3',
+      'cc-11-4',
+      'cc-11-6',
+      'cc-11-9',
+      'cc-11-12',
+      'cc-11-13a',
+      'cc-11-13b',
+      'cc-11-13c',
+      'cc-11-13d',
+      'cc-11-13e',
+    ],
     run: probeOutcomeFindings,
   },
   {
@@ -150,10 +168,73 @@ function probeOutcomeFindings(facts: readonly ScanFact[]): readonly Finding[] {
       expectation: fact.source.payload.expectation,
     };
     const outcome = classifyProbe(obs);
-    const finding = findingForOutcome(obs, outcome);
+    const finding = renderProbeFinding(obs, outcome);
     if (finding !== undefined) out.push(finding);
   }
   return out;
+}
+
+/**
+ * Step 39b Decision E (codex 39b-007 [APPLIED]): renders the per-probe
+ * Finding from a classified outcome. RELOCATED from
+ * `src/agents/sandbox-runner/outcome-classifier.ts` so the sandbox-runner
+ * stays Finding-free (V9 import-graph guard). The body is byte-equivalent
+ * to the pre-relocation `findingForOutcome` so 40c-v3's cc-11-3 V13
+ * cleanup-roundtrip test is unaffected (V9b regression assertion).
+ *
+ * MODULE-INTERNAL helper — not exported; the predicate body above is the
+ * sole call site.
+ */
+function renderProbeFinding(
+  obs: ProbeObservation,
+  outcome: ProbeOutcome,
+): Finding | undefined {
+  if (outcome === 'inconclusive') {
+    return {
+      id: `probe-inconclusive-${obs.probe_id}`,
+      control_id: obs.control_id,
+      finding_type: 'coverage_gap',
+      evidence_strength: 'low',
+      reproducibility: 'manual_review_required',
+      review_action: 'review_before_launch',
+      blast_radius: 'unknown',
+      title: `Probe ${obs.probe_id} outcome inconclusive`,
+      summary:
+        'Probe response was inconclusive; needs human review. Negative tests should be added.',
+      evidence_refs: [],
+    };
+  }
+  if (obs.expectation === 'expect_denial' && outcome === 'proven_allowed') {
+    return {
+      id: `probe-allowed-when-deny-expected-${obs.probe_id}`,
+      control_id: obs.control_id,
+      finding_type: 'confirmed_issue',
+      evidence_strength: 'high',
+      reproducibility: 'tool_output',
+      review_action: 'fix_before_launch',
+      blast_radius: obs.control_id === 'cc-11-2' ? 'admin_access' : 'user_data',
+      title: `Probe ${obs.probe_id}: access was allowed when denial was expected`,
+      summary:
+        'Active probe found a path that appears launch-blocking; needs human review.',
+      evidence_refs: [],
+    };
+  }
+  if (obs.expectation === 'expect_allow' && outcome === 'proven_denial') {
+    return {
+      id: `probe-denied-when-allow-expected-${obs.probe_id}`,
+      control_id: obs.control_id,
+      finding_type: 'likely_issue',
+      evidence_strength: 'medium',
+      reproducibility: 'tool_output',
+      review_action: 'review_before_launch',
+      blast_radius: 'availability',
+      title: `Probe ${obs.probe_id}: expected-allowed access was denied`,
+      summary:
+        'Active probe found that an allowed path was blocked; needs human review.',
+      evidence_refs: [],
+    };
+  }
+  return undefined;
 }
 
 /**

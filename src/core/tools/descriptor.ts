@@ -97,6 +97,19 @@ export interface ToolDescriptor<
     context: ToolContext,
     policy: ValidationPolicy,
   ) => Promise<Result<R, ToolInvocationError>>;
+  /**
+   * Step 39b Decision H (codex 39b-002 [APPLIED]): optional dynamic-gate
+   * hook. When set, the policy gate parses `args` first, then calls this
+   * hook to derive the effective capability set, then enforces ALL
+   * declared actions against `policy.allowed_actions`. Returns an empty
+   * array (or a sentinel) to force a deny (e.g. unknown probe_id).
+   *
+   * Descriptors WITHOUT this hook keep the existing static-action-before-
+   * parse behavior (no behavioral change for existing tools).
+   * Path-selection in the loop: `descriptor.requiredActionForArgs !==
+   * undefined`.
+   */
+  readonly requiredActionForArgs?: (args: A) => readonly AllowedAction[];
 }
 
 /**
