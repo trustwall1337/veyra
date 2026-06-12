@@ -9,10 +9,12 @@ import {
 } from '../../core/sandbox/http-write-registry.js';
 
 import { compileProbeRequest } from './probe-compiler.js';
-import {
-  classifyProbe,
-  findingForOutcome,
-} from './outcome-classifier.js';
+import { classifyProbe } from './outcome-classifier.js';
+// Step 39b (codex 39b-007 [APPLIED]): findingForOutcome relocated to
+// src/cli/floor-predicates.ts as the private `renderProbeFinding`. The
+// finding-shape assertions in this file are converted to outcome-only
+// assertions; the cc-11-3 finding-shape compat assertion lives in V9b
+// against the floor predicate.
 
 // Sample probe: cc-11-3 IDOR — direct object access at /api/orders/{id} with a
 // non-owning identity. The `id` placeholder is AI-authored (within schema:
@@ -122,9 +124,8 @@ describe('Step 39 — outcome classifier joins the floor (Verification f)', () =
       expectation: 'expect_denial' as const,
     };
     expect(classifyProbe(obs)).toBe('proven_allowed');
-    const f = findingForOutcome(obs, 'proven_allowed');
-    expect(f?.finding_type).toBe('confirmed_issue');
-    expect(f?.review_action).toBe('fix_before_launch');
+    // Step 39b: finding-shape verified via the floor predicate
+    // (renderProbeFinding) — see floor-predicates V9b assertion.
   });
 
   it('classifies an expect_denial probe that returned 403 as proven_denial → no finding', () => {
@@ -136,7 +137,7 @@ describe('Step 39 — outcome classifier joins the floor (Verification f)', () =
       expectation: 'expect_denial' as const,
     };
     expect(classifyProbe(obs)).toBe('proven_denial');
-    expect(findingForOutcome(obs, 'proven_denial')).toBeUndefined();
+    // proven_denial when expect_denial → no finding emitted by the floor.
   });
 
   it('is deterministic — same observation → same outcome', () => {

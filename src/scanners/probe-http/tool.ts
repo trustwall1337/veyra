@@ -10,7 +10,7 @@ import {
 import { asToolId } from '../../core/tools/tool-id.js';
 import type { WriteRegistry } from '../../core/sandbox/http-write-registry.js';
 import { compileProbeRequest } from '../../agents/sandbox-runner/probe-compiler.js';
-import { PROBE_PRIMITIVE_CATALOG } from '../../agents/sandbox-runner/probe-primitives.js';
+import { PROBE_PRIMITIVE_CATALOG } from '../../agents/sandbox-runner/probe-primitives/index.js';
 import { err, isErr, ok } from '../../types/result.js';
 import type { ScanFact } from '../../types/scan-fact.js';
 import {
@@ -53,8 +53,15 @@ export const PROBE_HTTP_TOOL_ID = 'probe-http';
 export const probeHttpArgsSchema = z.object({
   probe_id: z.string().min(1).max(128),
   actor_id: z.string().min(1).max(128),
-  /** AI-authored path-param values (Decision per primitive's requestSchema). */
-  path_params: z.record(z.string(), z.string()).default({}),
+  /**
+   * AI-authored path-param values. Type widened to `unknown` per Step 39b
+   * codex 39b-probe-args-structured-fields-broken [APPLIED]: per-primitive
+   * schemas may declare arrays (cc-11-1 pathSegments) or structured objects
+   * (cc-11-13c filter, cc-11-13d embed) that the compiler validates via the
+   * primitive's per-field schema. Generic `Record<string, string>` would
+   * arg-reject those before the per-primitive validator runs.
+   */
+  path_params: z.record(z.string(), z.unknown()).default({}),
   /** AI-authored body (validated against each primitive's bodySchema). */
   body: z.unknown().optional(),
 });
@@ -120,6 +127,17 @@ export function createProbeHttpTool(
     result_schema: toolResultSchema,
     required_action: 'call_api_with_test_identity',
     source_module: 'src/scanners/probe-http/tool.ts',
+    // Step 39b Decision H (codex 39b-002 + 39b-003 [APPLIED]):
+    // dynamic-gate hook returns the per-primitive `requiredActions`. The
+    // loop's Path B parses args first, then calls this to derive the
+    // effective capability set, then enforces ALL declared actions
+    // against `policy.allowed_actions`. Unknown probe_id → empty array
+    // → loop denies at the gate (before invoke).
+    requiredActionForArgs: (args) => {
+      const primitive = PROBE_PRIMITIVE_CATALOG.get(args.probe_id);
+      if (primitive === undefined) return [];
+      return primitive.requiredActions;
+    },
     invoke: async (args) => {
       // 1. Resolve the probe primitive from the runtime catalog.
       const primitive = PROBE_PRIMITIVE_CATALOG.get(args.probe_id);
@@ -163,11 +181,17 @@ export function createProbeHttpTool(
         );
       }
 
-      // 4. Record audit-only WriteEntry BEFORE send (Decision G.5).
+      // 4. Record WriteEntry BEFORE send using the primitive's declared
+      // cleanup_strategy (Step 39b codex 39b-cleanup-strategy-not-enforced
+      // [APPLIED]). 39b ships every probe with `cleanup_strategy: 'audit_only'`
+      // — the 5 originally-mutating probes (cc-11-4, cc-11-13b/c/d/e) are
+      // observational GETs in their final 39b shape; the body-predicates
+      // inspect the response. cc-11-4's POST + active-cleanup machinery is
+      // deferred to a follow-up step (uncertainty_notes documents this).
       deps.writeRegistry.recordHttpWrite({
         resource_id: `probe-http:${args.probe_id}:${args.actor_id}`,
         description_redacted: `probe-http: ${compiled.method} ${compiled.url} as actor_id=${args.actor_id}`,
-        cleanup_strategy: 'audit_only',
+        cleanup_strategy: primitive.cleanup_strategy,
       });
 
       // 5. Call recordProbeAttempt() per codex round-2 MF-2 — ledger contract.
@@ -203,7 +227,16 @@ export function createProbeHttpTool(
 
       // 7. Build the ProbeResponseSource ScanFact. Body is hashed; never persisted.
       const responseDigest = (deps.hashBody ?? defaultHashBody)(response.body);
-      const returnedRows = detectReturnedRows(response.body);
+      // Step 39b codex 39b-outcome-config-not-wired [APPLIED]: per-primitive
+      // body predicate. cc-11-1 uses detectProtectedJsonContent (HTML shell
+      // → false); cc-11-13b/c/d/e use cross-tenant / private-column checks
+      // that read structural args (privateColumns, tenantColumn, embed).
+      // Probes without bodyPredicate fall back to the default array-shape
+      // detection (preserves cc-11-3 behavior + simple probes).
+      const returnedRows =
+        primitive.bodyPredicate !== undefined
+          ? primitive.bodyPredicate(response.body, args.path_params)
+          : detectReturnedRows(response.body);
       const fact: ScanFact = {
         fact_id: createHash('sha256')
           .update(`${args.probe_id}:${args.actor_id}:${responseDigest}`)

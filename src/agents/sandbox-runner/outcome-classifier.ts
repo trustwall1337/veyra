@@ -1,15 +1,21 @@
-import type { Finding } from '../../types/finding.js';
-
 /**
- * Deterministic probe outcome classifier (Phase 3 / Step 39). Joins the floor
- * (Step 35 pattern): runs AFTER the loop, never inside. The classifier inputs
- * are facts the loop recorded (response status, response body shape — all
- * redacted via the loop-view redactor before reaching here) plus the probe's
- * intent ("expected to be denied" / "expected to be allowed").
+ * Deterministic probe outcome classifier (Phase 3 / Step 39; Step 39b
+ * Decision E codex 39b-007 [APPLIED] — Finding-free).
  *
- * Outputs are the three classes PLAN-v1 §D.F + the active-validation rules
- * agreed in Phase 2 step 10: `proven_denial`, `proven_allowed`, `inconclusive`.
- * Wording uses the allowed-claim vocabulary only.
+ * Joins the floor (Step 35 pattern): runs AFTER the loop, never inside.
+ * The classifier inputs are facts the loop recorded (response status,
+ * response body shape — all redacted via the loop-view redactor before
+ * reaching here) plus the probe's intent ("expected to be denied" /
+ * "expected to be allowed").
+ *
+ * Outputs are the three classes PLAN-v1 §D.F + the active-validation
+ * rules agreed in Phase 2 step 10: `proven_denial`, `proven_allowed`,
+ * `inconclusive`. Wording uses the allowed-claim vocabulary only.
+ *
+ * Step 39b: `findingForOutcome` REMOVED — relocated to
+ * `src/cli/floor-predicates.ts` as the module-internal helper
+ * `renderProbeFinding`. The sandbox-runner now imports no Finding and
+ * is statically Finding-unreachable (V9 import-graph guard).
  */
 
 export type ProbeOutcome = 'proven_denial' | 'proven_allowed' | 'inconclusive';
@@ -61,58 +67,6 @@ export function classifyProbe(obs: ProbeObservation): ProbeOutcome {
   return 'inconclusive';
 }
 
-/** Turn an unexpected probe outcome into a deterministic floor finding. */
-export function findingForOutcome(
-  obs: ProbeObservation,
-  outcome: ProbeOutcome,
-): Finding | undefined {
-  if (outcome === 'inconclusive') {
-    return {
-      id: `probe-inconclusive-${obs.probe_id}`,
-      control_id: obs.control_id,
-      finding_type: 'coverage_gap',
-      evidence_strength: 'low',
-      reproducibility: 'manual_review_required',
-      review_action: 'review_before_launch',
-      blast_radius: 'unknown',
-      title: `Probe ${obs.probe_id} outcome inconclusive`,
-      summary:
-        'Probe response was inconclusive; needs human review. Negative tests should be added.',
-      evidence_refs: [],
-    };
-  }
-  if (obs.expectation === 'expect_denial' && outcome === 'proven_allowed') {
-    // The control was expected to deny and did NOT. Likely launch-blocking.
-    return {
-      id: `probe-allowed-when-deny-expected-${obs.probe_id}`,
-      control_id: obs.control_id,
-      finding_type: 'confirmed_issue',
-      evidence_strength: 'high',
-      reproducibility: 'tool_output',
-      review_action: 'fix_before_launch',
-      blast_radius: 'user_data',
-      title: `Probe ${obs.probe_id}: access was allowed when denial was expected`,
-      summary:
-        'Active probe found a path that appears launch-blocking; needs human review.',
-      evidence_refs: [],
-    };
-  }
-  if (obs.expectation === 'expect_allow' && outcome === 'proven_denial') {
-    // Allowed path was denied — availability issue, but not security-blocking.
-    return {
-      id: `probe-denied-when-allow-expected-${obs.probe_id}`,
-      control_id: obs.control_id,
-      finding_type: 'likely_issue',
-      evidence_strength: 'medium',
-      reproducibility: 'tool_output',
-      review_action: 'review_before_launch',
-      blast_radius: 'availability',
-      title: `Probe ${obs.probe_id}: expected-allowed access was denied`,
-      summary:
-        'Active probe found that an allowed path was blocked; needs human review.',
-      evidence_refs: [],
-    };
-  }
-  // proven_denial when expect_denial, or proven_allowed when expect_allow → no finding.
-  return undefined;
-}
+// findingForOutcome REMOVED in step 39b (codex 39b-007 [APPLIED]).
+// The renderer is now `renderProbeFinding` (module-internal) in
+// `src/cli/floor-predicates.ts`. This file imports no `Finding` type.

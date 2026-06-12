@@ -525,25 +525,86 @@ export async function runAgenticLoop(
         continue;
       }
 
-      const gate = enforce(
-        {
-          serviceId: tool.tool_id,
-          tool: tool.tool_id,
-          action: tool.required_action,
-        },
-        deps.policy,
-      );
-      if (isErr(gate)) {
-        state.recordDenial(tool.tool_id, gate.error.message, depth);
-        sinceProgress += 1;
-        continue;
-      }
+      // Step 39b Decision H (codex 39b-gate-order-compat [APPLIED]): TWO
+      // explicit gate paths to preserve backward-compatibility for the ~10
+      // existing descriptors that do not declare requiredActionForArgs.
+      //
+      // Path A (no hook): policy.enforce(required_action) FIRST, then
+      //   args_schema parse. Existing behavior — no regression.
+      // Path B (descriptor declares requiredActionForArgs): args_schema
+      //   parse FIRST, then derive effective actions from parsed args,
+      //   then enforce(every effective action). Trace row carries
+      //   arg_validation: 'accepted' AND gate_decision: 'deny' when
+      //   policy denies a parsed-good call.
+      //
+      // Path-selection is purely additive — Path A is unchanged for every
+      // existing descriptor (read-code, gitleaks, semgrep, osv, supabase
+      // MCP tools, lovable MCP tools, synthesize-actor, etc.). Only
+      // probe-http opts into Path B in 39b via the hook.
+      const hookFn = tool.requiredActionForArgs;
+      let parsedArgs;
+      if (hookFn !== undefined) {
+        // Path B: parse-then-enforce.
+        parsedArgs = tool.args_schema.safeParse(proposal.args);
+        if (!parsedArgs.success) {
+          state.recordArgReject(tool.tool_id, 'args failed schema', depth);
+          sinceProgress += 1;
+          continue;
+        }
+        const effectiveActions = hookFn(parsedArgs.data);
+        if (effectiveActions.length === 0) {
+          // Sentinel: descriptor signalled "this args shape has no valid
+          // action" (e.g. unknown probe_id). Deny at the gate.
+          state.recordDenial(
+            tool.tool_id,
+            'requiredActionForArgs returned empty effective-action set',
+            depth,
+          );
+          sinceProgress += 1;
+          continue;
+        }
+        let denyReason: string | undefined;
+        for (const action of effectiveActions) {
+          const gateCheck = enforce(
+            {
+              serviceId: tool.tool_id,
+              tool: tool.tool_id,
+              action,
+            },
+            deps.policy,
+          );
+          if (isErr(gateCheck)) {
+            denyReason = gateCheck.error.message;
+            break;
+          }
+        }
+        if (denyReason !== undefined) {
+          state.recordDenial(tool.tool_id, denyReason, depth);
+          sinceProgress += 1;
+          continue;
+        }
+      } else {
+        // Path A: static-action enforce-then-parse (existing behavior).
+        const gate = enforce(
+          {
+            serviceId: tool.tool_id,
+            tool: tool.tool_id,
+            action: tool.required_action,
+          },
+          deps.policy,
+        );
+        if (isErr(gate)) {
+          state.recordDenial(tool.tool_id, gate.error.message, depth);
+          sinceProgress += 1;
+          continue;
+        }
 
-      const parsedArgs = tool.args_schema.safeParse(proposal.args);
-      if (!parsedArgs.success) {
-        state.recordArgReject(tool.tool_id, 'args failed schema', depth);
-        sinceProgress += 1;
-        continue;
+        parsedArgs = tool.args_schema.safeParse(proposal.args);
+        if (!parsedArgs.success) {
+          state.recordArgReject(tool.tool_id, 'args failed schema', depth);
+          sinceProgress += 1;
+          continue;
+        }
       }
 
       const t0 = now();

@@ -31,6 +31,26 @@ export function compileProbeRequest(
   // Validate each AI-authored path-param against its declared schema; fail
   // closed if a fixed-only placeholder was supplied with a different value
   // OR an authored placeholder is missing / malformed.
+  //
+  // Step 39b codex 39b-probe-args-structured-fields-broken [APPLIED]:
+  //  - the materialised value is the TRANSFORM OUTPUT of the schema; for
+  //    cc-11-13c/d/e this is a pre-built PostgREST query fragment that is
+  //    already URL-safe — the compiler MUST NOT re-encode it.
+  //  - identifier-only inputs (cc-11-3 id, cc-11-6 table, etc.) are
+  //    constrained to a regex that bans URL-fragment characters; encoding
+  //    them would be a no-op too.
+  //  - reject unknown keys in `proposed.path_params` that aren't declared
+  //    by the primitive's pathParams.
+  const declaredKeys = new Set(Object.keys(primitive.requestSchema.pathParams));
+  for (const key of Object.keys(proposed.path_params)) {
+    if (!declaredKeys.has(key)) {
+      return {
+        ok: false,
+        reason: `path param "${key}" is not declared by this probe primitive`,
+      };
+    }
+  }
+
   const materialisedParams: Record<string, string> = {};
   for (const [name, field] of Object.entries(primitive.requestSchema.pathParams)) {
     const supplied = proposed.path_params[name];
@@ -55,6 +75,10 @@ export function compileProbeRequest(
         reason: `path param ${name} failed schema`,
       };
     }
+    // Materialised value is the schema's transform output (or the raw value
+    // if no transform). String-coerce defensively; identifier-only schemas
+    // produce strings, structured schemas produce URL-safe fragments via
+    // their `.transform(...)` chain.
     materialisedParams[name] = String(parsed.data);
   }
 
@@ -65,11 +89,16 @@ export function compileProbeRequest(
   }
 
   // Materialise URL: substitute `{name}` placeholders.
+  // codex 39b-probe-args-structured-fields-broken [APPLIED]: do NOT call
+  // encodeURIComponent on materialised values. Identifier inputs are
+  // already URL-safe (regex enforces); structured inputs have already
+  // produced URL-safe transform output (encodeURIComponent on values
+  // inside the transform, literal `=` / `,` / `/` operators preserved).
   const url = primitive.requestSchema.urlTemplate.value.replace(
-    /\{([a-z_][a-z0-9_]*)\}/g,
+    /\{([a-z_][a-zA-Z0-9_]*)\}/g,
     (_match, key: string) => {
       const value = materialisedParams[key];
-      return value !== undefined ? encodeURIComponent(value) : `{${key}}`;
+      return value !== undefined ? value : `{${key}}`;
     },
   );
 
