@@ -1456,27 +1456,99 @@ async function runBedrockLoopBranch(
   const { runClassificationPredicates } = await import(
     '../core/orchestrator/floor.js'
   );
-  const result = await loopFactory({
-    registry,
-    aiDriver: driver,
-    policy,
-    context: toolContext,
-    artifactDir,
-    ...(Object.keys(loopOpts.value.loopBudget).length > 0
-      ? { caps: loopOpts.value.loopBudget }
-      : {}),
-    requiredModelId: inputs.aiModel,
-    runFloor: (facts, gaps) =>
-      runClassificationPredicates(facts, gaps, FLOOR_PREDICATES),
-    ...(args.briefing !== undefined ? { briefing: args.briefing } : {}),
-    ...(args.briefingDigest !== undefined ? { briefingDigest: args.briefingDigest } : {}),
+
+  // Step 40e: construct the per-scan hypothesis registry and register the
+  // two AI-authoring tools. The registry is closure-owned; the loop reads
+  // it only via `view.hypotheses` projection. Cleared in `finally` below.
+  // codex 40e-diff-001 [APPLIED]: use the real redactSecrets sanitizer
+  // (gitleaks + AI extras) so AI-authored prose can never persist raw
+  // secrets to hypotheses.json — never the identity (raw) => raw stub.
+  const { HypothesisRegistry } = await import('./hypothesis-registry/registry.js');
+  const { registerHypothesisTools } = await import('./tool-registration.js');
+  const { writeHypothesesArtifact } = await import(
+    './hypothesis-registry/persist.js'
+  );
+  const { redactSecrets: redactSecretsForBriefing } = await import(
+    '../ai/sanitization.js'
+  );
+  const hypothesisRegistry = new HypothesisRegistry({ now: Date.now });
+  // The `isAcceptedStepRef` predicate reads loop state — populated via the
+  // onStateConstructed callback before the first proposeNext runs.
+  const stateRef: { current: import('../core/orchestrator/artifact-state.js').ArtifactState | undefined } = { current: undefined };
+  registerHypothesisTools(registry, {
+    registry: hypothesisRegistry,
+    redactor: (raw) => redactSecretsForBriefing(raw) as unknown as string,
+    isAcceptedStepRef: (seq) => stateRef.current?.isAcceptedStepRef(seq) ?? false,
+    ...(inputs.aiModel !== undefined ? { modelId: inputs.aiModel } : {}),
   });
+
+  let result;
+  try {
+    result = await loopFactory({
+      registry,
+      aiDriver: driver,
+      policy,
+      context: toolContext,
+      artifactDir,
+      ...(Object.keys(loopOpts.value.loopBudget).length > 0
+        ? { caps: loopOpts.value.loopBudget }
+        : {}),
+      requiredModelId: inputs.aiModel,
+      runFloor: (facts, gaps) =>
+        runClassificationPredicates(facts, gaps, FLOOR_PREDICATES),
+      ...(args.briefing !== undefined ? { briefing: args.briefing } : {}),
+      ...(args.briefingDigest !== undefined ? { briefingDigest: args.briefingDigest } : {}),
+      hypothesisRegistry,
+      onStateConstructed: (state) => {
+        stateRef.current = state;
+      },
+    });
+  } finally {
+    // Step 40e Decision I: persist + clear regardless of loop outcome.
+    // Best-effort write (a failure leaves the registry in memory; clear
+    // still runs so no in-process residual after this branch returns).
+    try {
+      await writeHypothesesArtifact(artifactDir, hypothesisRegistry.snapshot());
+    } catch {
+      // best-effort
+    }
+    hypothesisRegistry.clear();
+  }
 
   // Bridge the loop result → markdown reporter.
   const trace: LoopTraceSummary = summariseRecords(
     result.state.records(),
     result.budget_snapshot,
   );
+  // Step 40e Decision J: hypothesis counts snapshot AFTER the loop ended +
+  // the registry was persisted but BEFORE the `clear()` ran (the registry
+  // is still live in this scope post-finally because we already persisted).
+  // Counts are read from the hypotheses.json artifact directly so the
+  // post-finally `clear()` doesn't race the count rendering.
+  let hypothesisCounts: Readonly<{
+    proposed: number;
+    partially_evidenced: number;
+    evidenced_against: number;
+    superseded: number;
+  }> = { proposed: 0, partially_evidenced: 0, evidenced_against: 0, superseded: 0 };
+  try {
+    const raw = await fs.readFile(
+      path.join(artifactDir, 'hypotheses.json'),
+      'utf8',
+    );
+    const parsed = JSON.parse(raw) as { readonly hypotheses: ReadonlyArray<{ readonly disposition: string }> };
+    const c = { proposed: 0, partially_evidenced: 0, evidenced_against: 0, superseded: 0 };
+    for (const h of parsed.hypotheses) {
+      if (h.disposition === 'proposed') c.proposed += 1;
+      else if (h.disposition === 'partially_evidenced') c.partially_evidenced += 1;
+      else if (h.disposition === 'evidenced_against') c.evidenced_against += 1;
+      else if (h.disposition === 'superseded') c.superseded += 1;
+    }
+    hypothesisCounts = c;
+  } catch {
+    // No artifact on disk → all-zero counts, footer still renders as 0 proposed.
+  }
+
   const markdown = renderAgenticReport({
     narrative_prose:
       result.findings.length === 0
@@ -1494,6 +1566,10 @@ async function runBedrockLoopBranch(
           },
         }
       : {}),
+    hypotheses_ref: {
+      basename: 'hypotheses.json',
+      counts: hypothesisCounts,
+    },
   });
   try {
     await fs.mkdir(path.dirname(inputs.outPath), { recursive: true });
@@ -1679,6 +1755,27 @@ async function runBedrockLoopBranchModeB(
   const toolContext = { scanId, projectPath: inputs.projectRoot, artifactDir };
   const loopFactory = deps.loopFactory ?? runAgenticLoop;
 
+  // Step 40e: per-scan hypothesis registry (Mode B). Same wiring shape as
+  // Mode A — closure-owned, projected via view.hypotheses, persisted at
+  // scan end, cleared in finally. codex 40e-diff-001 [APPLIED]: real
+  // redactSecrets sanitizer (never identity).
+  const { HypothesisRegistry } = await import('./hypothesis-registry/registry.js');
+  const { registerHypothesisTools } = await import('./tool-registration.js');
+  const { writeHypothesesArtifact } = await import(
+    './hypothesis-registry/persist.js'
+  );
+  const { redactSecrets: redactSecretsForBriefingModeB } = await import(
+    '../ai/sanitization.js'
+  );
+  const hypothesisRegistry = new HypothesisRegistry({ now: Date.now });
+  const stateRef: { current: import('../core/orchestrator/artifact-state.js').ArtifactState | undefined } = { current: undefined };
+  registerHypothesisTools(registry, {
+    registry: hypothesisRegistry,
+    redactor: (raw) => redactSecretsForBriefingModeB(raw) as unknown as string,
+    isAcceptedStepRef: (seq) => stateRef.current?.isAcceptedStepRef(seq) ?? false,
+    ...(inputs.aiModel !== undefined ? { modelId: inputs.aiModel } : {}),
+  });
+
   // try/finally cleanup — codex round-2 MF-4 + V4b.
   let result: import('../core/orchestrator/agentic-loop.js').AgenticLoopResult | undefined;
   let runError: Error | undefined;
@@ -1697,6 +1794,10 @@ async function runBedrockLoopBranchModeB(
         runClassificationPredicates(facts, gaps, FLOOR_PREDICATES),
       ...(args.briefing !== undefined ? { briefing: args.briefing } : {}),
       ...(args.briefingDigest !== undefined ? { briefingDigest: args.briefingDigest } : {}),
+      hypothesisRegistry,
+      onStateConstructed: (state) => {
+        stateRef.current = state;
+      },
     });
   } catch (cause) {
     runError = cause instanceof Error ? cause : new Error(String(cause));
@@ -1740,6 +1841,15 @@ async function runBedrockLoopBranchModeB(
     }
     // V21 — wipe the actor secret registry on success AND on crash.
     actorSecretRegistry.clearAll();
+
+    // Step 40e Decision I: persist hypotheses.json sibling to cleanup-proof
+    // + http-write-registry artifacts, then clear the registry. Best-effort.
+    try {
+      await writeHypothesesArtifact(artifactDir, hypothesisRegistry.snapshot());
+    } catch {
+      // best-effort
+    }
+    hypothesisRegistry.clear();
   }
 
   if (runError !== undefined) {
@@ -1870,6 +1980,31 @@ async function runBedrockLoopBranchModeB(
     result.state.records(),
     result.budget_snapshot,
   );
+  // Step 40e Decision J: hypothesis counts for the footer (Mode B).
+  let hypothesisCountsModeB: Readonly<{
+    proposed: number;
+    partially_evidenced: number;
+    evidenced_against: number;
+    superseded: number;
+  }> = { proposed: 0, partially_evidenced: 0, evidenced_against: 0, superseded: 0 };
+  try {
+    const raw = await fs.readFile(
+      path.join(artifactDir, 'hypotheses.json'),
+      'utf8',
+    );
+    const parsed = JSON.parse(raw) as { readonly hypotheses: ReadonlyArray<{ readonly disposition: string }> };
+    const c = { proposed: 0, partially_evidenced: 0, evidenced_against: 0, superseded: 0 };
+    for (const h of parsed.hypotheses) {
+      if (h.disposition === 'proposed') c.proposed += 1;
+      else if (h.disposition === 'partially_evidenced') c.partially_evidenced += 1;
+      else if (h.disposition === 'evidenced_against') c.evidenced_against += 1;
+      else if (h.disposition === 'superseded') c.superseded += 1;
+    }
+    hypothesisCountsModeB = c;
+  } catch {
+    // No artifact on disk → all-zero counts.
+  }
+
   const markdown = renderAgenticReport({
     narrative_prose:
       allFindings.length === 0
@@ -1888,6 +2023,10 @@ async function runBedrockLoopBranchModeB(
           },
         }
       : {}),
+    hypotheses_ref: {
+      basename: 'hypotheses.json',
+      counts: hypothesisCountsModeB,
+    },
   });
   try {
     await fs.mkdir(path.dirname(inputs.outPath), { recursive: true });

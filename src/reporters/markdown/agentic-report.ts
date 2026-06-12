@@ -68,6 +68,21 @@ export interface AgenticReportInput {
     readonly basename: string;
     readonly degraded: boolean;
   };
+  /**
+   * Step 40e Decision J — one-line audit pointer to `hypotheses.json`. Counts
+   * ONLY (no statement text — operators must NEVER read AI hypothesis prose
+   * as findings). Rendered under "Scan metadata" as a footer reference;
+   * never a rendered section.
+   */
+  readonly hypotheses_ref?: {
+    readonly basename: string;
+    readonly counts: Readonly<{
+      proposed: number;
+      partially_evidenced: number;
+      evidenced_against: number;
+      superseded: number;
+    }>;
+  };
 }
 
 const SECTION_NARRATIVE = '## Narrative';
@@ -120,13 +135,20 @@ export function renderAgenticReport(input: AgenticReportInput): string {
   parts.push(SECTION_TRACE);
   parts.push(renderTraceSummary(input.trace));
 
-  // 7. Scan metadata (Step 40d Decision G): one-line audit pointer to the
-  // briefing artifact when synthesized. Never a section; never rendered
-  // briefing field content.
-  if (input.project_briefing_ref !== undefined) {
+  // 7. Scan metadata (Step 40d Decision G + Step 40e Decision J): one-line
+  // audit pointers ONLY. Never a section; never rendered briefing /
+  // hypothesis field content.
+  const hasBriefing = input.project_briefing_ref !== undefined;
+  const hasHypotheses = input.hypotheses_ref !== undefined;
+  if (hasBriefing || hasHypotheses) {
     parts.push('');
     parts.push(SECTION_SCAN_METADATA);
-    parts.push(renderBriefingFooter(input.project_briefing_ref));
+    if (input.project_briefing_ref !== undefined) {
+      parts.push(renderBriefingFooter(input.project_briefing_ref));
+    }
+    if (input.hypotheses_ref !== undefined) {
+      parts.push(renderHypothesesFooter(input.hypotheses_ref));
+    }
   }
 
   return parts.join('\n');
@@ -138,6 +160,24 @@ function renderBriefingFooter(ref: {
 }): string {
   const suffix = ref.degraded ? ' (degraded)' : '';
   return `- Project briefing: ${ref.basename}${suffix}`;
+}
+
+function renderHypothesesFooter(ref: {
+  readonly basename: string;
+  readonly counts: Readonly<{
+    proposed: number;
+    partially_evidenced: number;
+    evidenced_against: number;
+    superseded: number;
+  }>;
+}): string {
+  const c = ref.counts;
+  const parts: string[] = [];
+  parts.push(`${String(c.proposed)} proposed`);
+  if (c.partially_evidenced > 0) parts.push(`${String(c.partially_evidenced)} partially_evidenced`);
+  if (c.evidenced_against > 0) parts.push(`${String(c.evidenced_against)} evidenced_against`);
+  if (c.superseded > 0) parts.push(`${String(c.superseded)} superseded`);
+  return `- Hypotheses: ${ref.basename} (${parts.join(', ')})`;
 }
 
 function renderRootCause(findings: readonly Finding[]): string {

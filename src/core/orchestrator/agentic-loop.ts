@@ -209,6 +209,23 @@ export interface RunAgenticLoopDeps {
    * set, ROW 0 of the trace JSONL carries it; subsequent rows do not.
    */
   readonly briefingDigest?: string;
+  /**
+   * Step 40e: in-process hypothesis registry. When set, every `view` handed
+   * to `proposeNext` carries `view.hypotheses` projected from
+   * `registry.snapshot()`. The loop passes it through to ArtifactState; the
+   * terminal-row trace emit reads `registry.snapshot().length` and surfaces
+   * it under `hypothesis_count` (Decision H — codex-applied, terminal-row
+   * carry NOT row-0 mutation).
+   */
+  readonly hypothesisRegistry?: import('../../cli/hypothesis-registry/registry.js').HypothesisRegistry;
+  /**
+   * Step 40e: fires once, immediately after `ArtifactState` is constructed,
+   * BEFORE the first `proposeNext` runs. Used by the CLI to bind closures
+   * that need a ref to `state` (specifically the hypothesis-tool's
+   * `isAcceptedStepRef` grounding check — Decision M). The callback is
+   * synchronous and must not throw; failures are swallowed.
+   */
+  readonly onStateConstructed?: (state: ArtifactState) => void;
 }
 
 const DEFAULT_STALL_WINDOW = 5;
@@ -261,12 +278,29 @@ export async function runAgenticLoop(
      * `briefing_digest`.
      */
     briefingDigest: string | undefined;
+    /**
+     * Step 40e Decision H (codex-applied): pre-seeded BEFORE the terminal
+     * record is appended; cleared after that emit. The agentic loop sets
+     * this in `setTerminalRowMetadata()` right before recording the
+     * `done` / `early_done` / `budget_halt` / `stall_halt` / `driver_error`
+     * record. Append-only invariant preserved.
+     */
+    hypothesisCount: number | undefined;
   } = {
     viewDigest: '',
     modelId: deps.requiredModelId,
     promptFingerprint: undefined,
     subagentTarget: undefined,
     briefingDigest: deps.briefingDigest,
+    hypothesisCount: undefined,
+  };
+
+  // Step 40e: pre-seed hypothesisCount immediately before the terminal-row
+  // append. Called from each termination path (the helper just below).
+  const setTerminalRowMetadata = (): void => {
+    if (deps.hypothesisRegistry !== undefined) {
+      snapshot.hypothesisCount = deps.hypothesisRegistry.snapshot().length;
+    }
   };
 
   // Trace hook: one JSONL row per state record. Fire-and-forget; serialised
@@ -278,6 +312,11 @@ export async function runAgenticLoop(
     if (snapshot.briefingDigest !== undefined) {
       snapshot.briefingDigest = undefined;
     }
+    // Step 40e Decision H: same one-time-emit semantics for hypothesis_count
+    // on the TERMINAL row.
+    if (snapshot.hypothesisCount !== undefined) {
+      snapshot.hypothesisCount = undefined;
+    }
     void traceWriter.writeStep(mapRecordToTraceRow(record, rowSnapshot, budget, {
       policyHash,
       descriptorHash,
@@ -288,7 +327,22 @@ export async function runAgenticLoop(
     artifactDir: deps.artifactDir,
     onRecord,
     ...(deps.briefing !== undefined ? { briefing: deps.briefing } : {}),
+    ...(deps.hypothesisRegistry !== undefined
+      ? { hypothesisRegistry: deps.hypothesisRegistry }
+      : {}),
   });
+
+  // Step 40e: fire the post-construction hook so the CLI can bind
+  // closures that need a ref to `state` (e.g. the hypothesis-tool's
+  // isAcceptedStepRef grounding check). Synchronous + fire-and-forget;
+  // failures must not corrupt the loop.
+  if (deps.onStateConstructed !== undefined) {
+    try {
+      deps.onStateConstructed(state);
+    } catch {
+      // intentionally swallowed
+    }
+  }
 
   const fullScope: ReadonlySet<ToolId> = new Set(
     deps.registry.descriptors().map((d) => d.tool_id),
@@ -311,11 +365,13 @@ export async function runAgenticLoop(
     while (true) {
       const trip = childBudget.exceeded();
       if (trip !== undefined) {
+        if (depth === 0) setTerminalRowMetadata();
         state.recordBudgetHalt(trip, depth);
         setTermination('budget_halt', depth);
         break;
       }
       if (sinceProgress >= stallWindow) {
+        if (depth === 0) setTerminalRowMetadata();
         state.recordStallHalt(depth);
         setTermination('stall_halt', depth);
         break;
@@ -338,6 +394,7 @@ export async function runAgenticLoop(
         // error inside the child. Re-throw so the parent's spawn catch records
         // `subagent_error` (the deep-dive target → §K coverage_gap via floor).
         if (depth > 0) throw cause;
+        setTerminalRowMetadata();
         state.recordDriverError(errorClassOf(cause), depth);
         setTermination('driver_error', depth);
         break;
@@ -360,14 +417,21 @@ export async function runAgenticLoop(
       const proposal = parsed.data;
 
       if (proposal.kind === 'done') {
-        state.recordDone(depth);
         if (depth === 0 && !ledger.baselineSatisfied(state)) {
+          // Step 40e Decision H: read registry size BEFORE the terminal
+          // recordEarlyDone appends (append-only invariant). The done
+          // record fires first but it's not the scan-terminal row here —
+          // recordEarlyDone is. Set the snapshot just before that.
+          state.recordDone(depth);
+          setTerminalRowMetadata();
           state.recordEarlyDone(
             ledger.missing(state).map((g) => g.baseline_item_id),
             depth,
           );
           setTermination('early_done', depth);
         } else {
+          if (depth === 0) setTerminalRowMetadata();
+          state.recordDone(depth);
           setTermination('done', depth);
         }
         break;
@@ -611,6 +675,12 @@ function mapRecordToTraceRow(
      * the caller (the loop's `onRecord` hook) clears it after row 0 lands.
      */
     readonly briefingDigest: string | undefined;
+    /**
+     * Step 40e Decision H (codex-applied): present only on the TERMINAL
+     * trace row; the caller pre-seeds it just before the terminal record
+     * appends and clears after.
+     */
+    readonly hypothesisCount: number | undefined;
   },
   budget: { snapshot: () => import('./loop-budget.js').BudgetSnapshot },
   hashes: {
@@ -646,6 +716,9 @@ function mapRecordToTraceRow(
       : {}),
     ...(snapshot.briefingDigest !== undefined
       ? { briefing_digest: snapshot.briefingDigest }
+      : {}),
+    ...(snapshot.hypothesisCount !== undefined
+      ? { hypothesis_count: snapshot.hypothesisCount }
       : {}),
   };
 

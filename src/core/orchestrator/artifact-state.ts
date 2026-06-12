@@ -11,6 +11,14 @@ import type { NamedFact, ToolResult } from '../../types/tool-result.js';
 // `src/cli/` references.
 // eslint-disable-next-line import/no-relative-packages
 import type { ProjectBriefing } from '../../cli/briefing/types.js';
+// Step 40e Decision B / Decision C: same layer-dodge rationale as the
+// briefing — `LoopHypothesis` lives under src/cli/ so the registry impl
+// can use the Redactor chokepoint without violating no-cross-layer-imports.
+// The `import type` is erased at runtime.
+// eslint-disable-next-line import/no-relative-packages
+import type { LoopHypothesis } from '../../cli/hypothesis-registry/types.js';
+// eslint-disable-next-line import/no-relative-packages
+import type { HypothesisRegistry } from '../../cli/hypothesis-registry/registry.js';
 
 /**
  * Append-only loop state (Phase 3 / Agentic Veyra, PLAN §B). Every loop event
@@ -79,6 +87,13 @@ export interface LoopView {
    * synthesized (Phase-3 legacy paths + tests).
    */
   readonly briefing?: ProjectBriefing;
+  /**
+   * Step 40e: chronological snapshot of AI-authored hypotheses (Decision G).
+   * Projected from the closure-owned HypothesisRegistry on every
+   * `readableView()` call; the AI reads it but the loop never mutates it.
+   * Absent when no registry is wired.
+   */
+  readonly hypotheses?: readonly LoopHypothesis[];
 }
 
 export interface ArtifactStateOptions {
@@ -97,6 +112,13 @@ export interface ArtifactStateOptions {
    * mutated thereafter.
    */
   readonly briefing?: ProjectBriefing;
+  /**
+   * Step 40e: in-process hypothesis registry. When present, every
+   * `readableView()` projects `registry.snapshot()` under `view.hypotheses`.
+   * The registry mutates via propose-hypothesis / update-hypothesis tool
+   * invocations; ArtifactState reads it only.
+   */
+  readonly hypothesisRegistry?: HypothesisRegistry;
 }
 
 /** Append-only loop state. */
@@ -252,6 +274,7 @@ export class ArtifactState {
 
   /** The redacted-in-Step-34 view handed to the AI driver. */
   readableView(): LoopView {
+    const hypothesisSnapshot = this.options.hypothesisRegistry?.snapshot();
     return {
       steps: this.log.map((r) => ({
         seq: r.seq,
@@ -262,7 +285,24 @@ export class ArtifactState {
       ...(this.options.briefing !== undefined
         ? { briefing: this.options.briefing }
         : {}),
+      ...(hypothesisSnapshot !== undefined
+        ? { hypotheses: hypothesisSnapshot }
+        : {}),
     };
+  }
+
+  /**
+   * Step 40e: predicate the update-hypothesis tool's `step_refs` grounding
+   * check calls (Decision M). Returns true iff `seq` is recorded as a
+   * `tool_accepted` step. Constructed in the loop driver via closure over
+   * this state so it stays a read-only projection — the tool descriptor
+   * never receives a reference to `ArtifactState` itself (F3 stability).
+   */
+  isAcceptedStepRef(seq: number): boolean {
+    for (const record of this.log) {
+      if (record.seq === seq && record.kind === 'tool_accepted') return true;
+    }
+    return false;
   }
 
   /** The full append-only record list (for the audit trail in Step 34). */

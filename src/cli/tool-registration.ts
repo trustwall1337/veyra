@@ -20,6 +20,9 @@ import {
 } from '../scanners/probe-http/tool.js';
 import { createSemgrepTool } from '../scanners/semgrep/tool.js';
 import type { SemgrepRunner } from '../scanners/semgrep/types.js';
+import type { HypothesisRegistry } from './hypothesis-registry/registry.js';
+import { createProposeHypothesisTool } from './hypothesis-registry/tools/propose-hypothesis/tool.js';
+import { createUpdateHypothesisTool } from './hypothesis-registry/tools/update-hypothesis/tool.js';
 
 /**
  * Non-core tool registration layer (Phase 3 / Step 33, PLAN §B placement rule).
@@ -143,6 +146,47 @@ export function registerActiveValidationTools(
       baseUrl: options.baseUrl,
       anonKey: options.anonKey,
       recordProbeAttempt: options.recordProbeAttempt,
+    }),
+  );
+}
+
+/**
+ * Step 40e: hypothesis-authoring tools. Registers propose-hypothesis +
+ * update-hypothesis against the closure-injected HypothesisRegistry. Both
+ * tools require `'author_hypothesis'` (a custom policy can omit it for
+ * strict-audit scans where AI hypothesis authoring is undesired even
+ * though code reads are allowed).
+ *
+ * Mode A and Mode B both call this helper — hypothesis authoring is
+ * policy-mode-neutral by default.
+ */
+export interface HypothesisRegistrationOptions {
+  readonly registry: HypothesisRegistry;
+  /** Loop-side redactor used to scrub AI prose before the registry stores it. */
+  readonly redactor: (raw: string) => string;
+  /** Read-only: is `seq` an accepted loop step (Decision M grounding)? */
+  readonly isAcceptedStepRef: (seq: number) => boolean;
+  /** Audit metadata for hypothesis rows; absent on --no-ai paths. */
+  readonly modelId?: string;
+}
+
+export function registerHypothesisTools(
+  registry: ToolRegistry,
+  options: HypothesisRegistrationOptions,
+): void {
+  registry.register(
+    createProposeHypothesisTool({
+      registry: options.registry,
+      redactor: options.redactor,
+      isAcceptedStepRef: options.isAcceptedStepRef,
+      ...(options.modelId !== undefined ? { modelId: options.modelId } : {}),
+    }),
+  );
+  registry.register(
+    createUpdateHypothesisTool({
+      registry: options.registry,
+      redactor: options.redactor,
+      isAcceptedStepRef: options.isAcceptedStepRef,
     }),
   );
 }

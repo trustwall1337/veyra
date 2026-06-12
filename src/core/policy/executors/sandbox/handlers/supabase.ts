@@ -75,5 +75,9 @@ export function buildSupabaseHandlers(
     call_api_with_test_identity: stub('call_api_with_test_identity'),
     verify_denial: stub('verify_denial'),
     cleanup_veyra_created_data: stub('cleanup_veyra_created_data'),
+    // Step 40e: hypothesis authoring is an in-process, AI-side action;
+    // it never routes through the SandboxExecutor. Stub kept for
+    // exhaustiveness so the closed-union AllowedAction stays covered.
+    author_hypothesis: stub('author_hypothesis'),
   };
 }

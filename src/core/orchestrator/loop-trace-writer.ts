@@ -65,6 +65,15 @@ export interface LoopTraceRow {
    * synthesized pre-loop; every subsequent row omits this field.
    */
   readonly briefing_digest?: string;
+  /**
+   * Step 40e Decision H (codex-applied): registry snapshot length at scan
+   * end. Set ONLY on the TERMINAL row (the last appended `done` /
+   * `early_done` / `budget_halt` / `stall_halt` / `driver_error` row).
+   * Row 0 does NOT carry this field; intermediate rows do not carry it.
+   * Append-only invariant preserved: the snapshot is read BEFORE the
+   * terminal row appends, never post-hoc.
+   */
+  readonly hypothesis_count?: number;
 }
 
 export interface LoopTraceWriter {

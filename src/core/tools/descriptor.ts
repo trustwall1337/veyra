@@ -16,7 +16,13 @@ import type { ToolId } from './tool-id.js';
  * unexpected; the loop's per-tool `try/catch` records those too.
  */
 export class ToolInvocationError extends Error {
-  override readonly name = 'ToolInvocationError';
+  /**
+   * Override the inherited `Error.name`. Typed as `string` (not the literal)
+   * so concrete subclasses (e.g. 40e's ClassificationKeyInArgsError) can
+   * specialize the name. The loop reads `error.name` for the trace row's
+   * `tool_error_class` audit field.
+   */
+  override readonly name: string = 'ToolInvocationError';
 }
 
 /**
