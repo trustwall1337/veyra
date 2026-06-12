@@ -27,14 +27,14 @@ describe('createDefaultProviderRegistry', () => {
 
   it('returns undefined for an unknown provider id', () => {
     const registry = createDefaultProviderRegistry();
-    expect(registry.resolve('bedrock')).toBeUndefined();
+    expect(registry.resolve('frobnicate')).toBeUndefined();
     expect(registry.resolve('')).toBeUndefined();
   });
 
-  it('lists both Phase 1 entries', () => {
+  it('lists the registered provider ids (Phase 3 adds Bedrock per D4)', () => {
     const registry = createDefaultProviderRegistry();
     const ids = registry.list().map((e) => e.id as string);
-    expect(ids).toEqual(['anthropic', 'openai']);
+    expect(ids).toEqual(['anthropic', 'openai', 'bedrock']);
   });
 
   it('returns ProviderId-branded ids (FPP §2A — no raw string union leaks out)', () => {

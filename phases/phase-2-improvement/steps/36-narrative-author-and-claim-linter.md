@@ -1,6 +1,6 @@
 # Step 36 — Narrative author + claim-linter + deterministic renderer
 
-**Status:** not started
+**Status:** done (2026-05-28) — claim-record substrate + deterministic composer + linter + pure renderer + 4 templates landed; AI authoring slots over the same ClaimRecord[] surface in a follow-up
 **Maps to:** `PLAN.md §G` (DEPRECATE ai-explainer), carries PLAN-v1 §D.A (claim-records → deterministic prose)
 **Phase:** 3, Cut 2
 **Produces:** `src/agents/narrative-author/` (emits `ClaimRecord[]` only, never free-form prose) + `src/agents/narrative-author/templates/` (one per `(claim_type, predicate_kind)`, `output-language-lint`-clean) + claim-linter + deterministic `narrative-renderer`; DEPRECATEs Phase 2 step 09 `ai-explainer`.

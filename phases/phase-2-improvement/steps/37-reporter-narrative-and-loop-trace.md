@@ -1,6 +1,6 @@
 # Step 37 — Reporter: narrative section + per-control cards + loop-trace summary
 
-**Status:** not started
+**Status:** done (2026-05-28) — agentic report renderer landed (narrative → root-cause → cards → active → gaps → trace; output-language-lint clean; fallback marker rendered)
 **Maps to:** `PLAN.md §G` (AMEND reporter), `§M` (report shape)
 **Phase:** 3, Cut 2
 **Produces:** reporter extension (`src/reporters/markdown/`) rendering the authored narrative ABOVE the per-control cards, plus a loop-trace summary section; prefers `narrative.json` over legacy `ai-enrichments.json` when both exist.

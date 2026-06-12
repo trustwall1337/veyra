@@ -1,6 +1,6 @@
 # Step 38 — Unified write registry + cleanup reverse-walk (both write paths)
 
-**Status:** not started
+**Status:** done (2026-05-28) — unified WriteRegistry + executeWriteWithRegistry + LIFO reverse-walk + cleanup_failed launch-blocker + structural lint guard landed; Phase 2 sandbox-runner test-catalog grandfathered pending step 39 probe-primitive split
 **Maps to:** `PLAN.md §D.3` (both write paths), `decisions.md` D1
 **Phase:** 3, Cut 3
 **Produces:** `src/core/sandbox/http-write-registry.ts` + `executeWriteWithRegistry()` (sole HTTP write entry, Path 1); a unified `WriteRegistry` contract wrapping both Path 1 (HTTP `transport.send`) and Path 2 (Admin-SDK synthetic-resource registry, `synthetic-data-manager/agent.ts:111`); post-loop cleanup reverse-walk over both → one `cleanup_proof`/`residual_count`; a lint guard rejecting direct mutating writes.

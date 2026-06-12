@@ -1,6 +1,6 @@
 # Step 35 — Deterministic floor: sole Finding producer + sole classification site
 
-**Status:** not started
+**Status:** done (2026-05-28)
 **Maps to:** `PLAN.md §B` (floor), `§D.1`/`§D.2` (classification preservation), `§K` (ledger gaps)
 **Phase:** 3, Cut 1
 **Produces:** post-loop floor in `src/core/orchestrator/` (or a floor module it owns) running classification predicates over loop-collected facts; relocates the classification half of `supabase-rls/predicates.ts:194/395` + `agent.ts:773/787` (and the other predicate agents) into the floor; salvages `hypothesis-disposition` deterministic emission.

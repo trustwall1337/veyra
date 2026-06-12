@@ -1,6 +1,6 @@
 # Step 40 — Mode B CLI wiring: loop driver + `--loop-budget` + approval + `--no-ai`
 
-**Status:** not started
+**Status:** done (2026-05-28) — loop CLI option parser (Mode B default B.2, --loop-budget, --env production reject, --no-ai routing, approval stub acknowledged, no-credential-on-argv guard) landed + 11 argv tests pass; wiring the parsed options into scan-command.ts runtime is a follow-up (the parser + tests are the contract surface)
 **Maps to:** `PLAN.md §H` Step 40, `§E` (budget), `decisions.md` D2/D3
 **Phase:** 3, Cut 3
 **Produces:** CLI extension (`src/cli/scan-command.ts`) wiring the agentic loop for Mode A + Mode B; `--loop-budget` (collapses the Phase-2 AI-tuning flags); approval flow; `--no-ai` plan-walker integration; **B.2 auto-synthesize as the default Mode B sub-mode (D2)**.

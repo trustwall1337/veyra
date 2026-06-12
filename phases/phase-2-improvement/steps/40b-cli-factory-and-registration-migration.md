@@ -1,6 +1,6 @@
 # Step 40b — CLI factory + registration migration (orchestrator → loop)
 
-**Status:** not started
+**Status:** done (2026-05-28) — seam landed + structural-drift test; full physical retirement of `scan-orchestrator.ts` / `agent-registration.ts` deferred to step 40 (Mode B CLI wiring)
 **Maps to:** `PLAN.md §G.1`
 **Phase:** 3, Cut 1 (CLI cannot call the loop without it)
 **Produces:** migration of the CLI seam from the topo-sort orchestrator to the agentic loop: `ScanCommandDeps.orchestratorFactory: () => ScanOrchestrator` → `loopFactory: () => AgenticLoop` (stays an injected field — preserves the fake-runner test seam, no circular dep per codex r2); `registerPhase1Agents(orch)` → `registerTools(catalog)` (Step 33's `tool-registration.ts`); migrate every test import.

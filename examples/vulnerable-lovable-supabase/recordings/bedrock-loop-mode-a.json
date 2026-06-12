@@ -1,0 +1,21 @@
+{
+  "_synthetic": true,
+  "_note": "Step 31d placeholder. Replace with a real Bedrock Converse capture from `AWS_PROFILE=preprod pnpm dev -- scan --ai-provider bedrock ...`. Each element is a BedrockStructuredResponse (proposal validated by aiProposalSchema; cost_units optional; prompt_fingerprint_sha256 optional).",
+  "recordings": [
+    {
+      "proposal": { "kind": "invoke_tool", "tool_id": "run-gitleaks", "args": {} },
+      "cost_units": 1820,
+      "prompt_fingerprint_sha256": "synthetic-fp-0001"
+    },
+    {
+      "proposal": { "kind": "invoke_tool", "tool_id": "read-schema-meta", "args": {} },
+      "cost_units": 1640,
+      "prompt_fingerprint_sha256": "synthetic-fp-0002"
+    },
+    {
+      "proposal": { "kind": "done" },
+      "cost_units": 420,
+      "prompt_fingerprint_sha256": "synthetic-fp-0003"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Step 34 — Loop-view redaction + audit trail (`loop-trace.jsonl`)
 
-**Status:** not started
+**Status:** done (2026-05-28)
 **Maps to:** `PLAN.md §D.4` (loop-view redaction), `§F` (audit trail fields)
 **Phase:** 3, Cut 1
 **Produces:** `src/ai/ai-output-redaction.ts` (stable-alias redaction for tool results re-entering the loop view; carried from PLAN-v1 §D.C), `loop-trace.jsonl` writer (`ArtifactKind: loop_trace`).

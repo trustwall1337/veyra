@@ -28,6 +28,7 @@ coverage/
 .claude/codex-review.log
 .claude/review-runs/
 .claude/plans/
+.claude/scheduled_tasks.lock
 
 # Phases are tracked (per CLAUDE.md: planning docs live in the repo so
 # contributors see the constraints behind each change). Only per-run scratch

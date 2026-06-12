@@ -22,7 +22,13 @@ export type AllowedAction =
   | 'create_synthetic_record'
   | 'call_api_with_test_identity'
   | 'verify_denial'
-  | 'cleanup_veyra_created_data';
+  | 'cleanup_veyra_created_data'
+  // Step 40e Decision E (codex 40e-allowed-action-read-code-does-not-hold
+  // [APPLIED]): the AI's in-process hypothesis authoring is a distinct
+  // policy axis from read_code. An operator wanting code reads but no AI
+  // hypothesis authoring (strict-audit mode) can construct a policy that
+  // omits this action.
+  | 'author_hypothesis';
 
 export interface ApprovalPolicy {
   readonly required: boolean;
@@ -49,6 +55,9 @@ const READ_ONLY_ACTIONS: ReadonlySet<AllowedAction> = new Set<AllowedAction>([
   'read_schema_metadata',
   'read_storage_metadata',
   'read_scanner_logs',
+  // Step 40e: hypothesis authoring is policy-mode-neutral by default; an
+  // operator can construct a custom policy that omits it.
+  'author_hypothesis',
 ]);
 
 const ACTIVE_ACTIONS: ReadonlySet<AllowedAction> = new Set<AllowedAction>([

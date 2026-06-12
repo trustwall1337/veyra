@@ -16,7 +16,13 @@ import type { ToolId } from './tool-id.js';
  * unexpected; the loop's per-tool `try/catch` records those too.
  */
 export class ToolInvocationError extends Error {
-  override readonly name = 'ToolInvocationError';
+  /**
+   * Override the inherited `Error.name`. Typed as `string` (not the literal)
+   * so concrete subclasses (e.g. 40e's ClassificationKeyInArgsError) can
+   * specialize the name. The loop reads `error.name` for the trace row's
+   * `tool_error_class` audit field.
+   */
+  override readonly name: string = 'ToolInvocationError';
 }
 
 /**
@@ -30,6 +36,14 @@ export class ToolInvocationError extends Error {
 export interface ToolContext {
   readonly scanId: string;
   readonly projectPath: string;
+  /**
+   * Per-scan artifact directory (codex p3-r1-007). Optional so existing tools
+   * (gitleaks, read-code, ...) can ignore it; tools that produce a named
+   * artifact for the §K ledger (e.g. `read-schema-meta` writing
+   * `database-metadata.json`) use it. The loop populates this from the same
+   * `artifactDir` it hands to `ArtifactState` and the trace writer.
+   */
+  readonly artifactDir?: string;
 }
 
 /**
