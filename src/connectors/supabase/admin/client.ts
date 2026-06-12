@@ -116,6 +116,18 @@ export interface AdminSdkLike {
         };
         error: { status: number; message: string } | null;
       }>;
+      /**
+       * Step 40c-v3 Decision G.4 — revoke a synthetic user's active session
+       * server-side before deleteUser is called. Supabase exposes this as
+       * `auth.admin.signOut(jwt)`; some SDK versions accept either the JWT or
+       * the user uid. The connector wrapper picks the right one based on
+       * what the installed SDK exposes; this interface declares the narrow
+       * accepted input shape (string token) to keep the contract minimal.
+       */
+      signOut(jwtOrUid: string): Promise<{
+        data: unknown;
+        error: { status?: number; message: string } | null;
+      }>;
     };
   };
 }
@@ -135,6 +147,14 @@ export interface SupabaseAdminClient {
   findOrphanedSyntheticUsers(): Promise<
     Result<readonly string[], Error>
   >;
+  /**
+   * Step 40c-v3 Decision G.4 — revoke a synthetic user's active session.
+   * Caller passes the JWT (preferred — SDK accepts it directly) OR the UID
+   * (older SDKs). The wrapper just forwards the token to the SDK.
+   * Production callers from Mode B cleanup pass the JWT pulled from
+   * `ActorSecretRegistry` at `finally`-time.
+   */
+  signOutUser(jwtOrUid: string): Promise<Result<void, Error>>;
 }
 
 const SUPABASE_ADMIN_CONNECTOR_ID: ConnectorId = (() => {
@@ -277,6 +297,32 @@ export function createSupabaseAdminClient(
         if (r.data.user !== null) orphans.push(uid);
       }
       return ok(orphans);
+    },
+
+    async signOutUser(jwtOrUid) {
+      // Step 40c-v3 Decision G.4 — revoke a synthetic user's active session
+      // server-side before cleanup deletes them. Forwards the token to the
+      // SDK's `auth.admin.signOut`. The wrapper does NOT inspect the token
+      // value (it could be a UID OR a JWT depending on caller and SDK
+      // version); the wrapper redacts the raw value out of any error
+      // message via `redact()` so the service-role key the SDK transport
+      // uses can never surface to logs / artifacts (CLAUDE.md §Secrets).
+      try {
+        const r = await sdkClient.auth.admin.signOut(jwtOrUid);
+        if (r.error !== null) {
+          const status =
+            r.error.status !== undefined ? String(r.error.status) : 'unknown';
+          return err(
+            new Error(
+              `supabase-admin signOut failed (status=${status}): ${redact(r.error.message)}`,
+            ),
+          );
+        }
+        return ok(undefined);
+      } catch (cause) {
+        const m = cause instanceof Error ? cause.message : String(cause);
+        return err(new Error(`supabase-admin signOut threw: ${redact(m)}`));
+      }
     },
   };
 }

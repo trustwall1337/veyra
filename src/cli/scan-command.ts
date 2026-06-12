@@ -14,11 +14,18 @@ import {
   type ScanOrchestrator,
 } from '../core/orchestrator/scan-orchestrator.js';
 import { runAgenticLoop } from '../core/orchestrator/agentic-loop.js';
+import { createToolRegistry } from '../core/tools/registry.js';
+import {
+  type LoopTraceSummary,
+  renderAgenticReport,
+} from '../reporters/markdown/agentic-report.js';
 import {
   bundledRulesDir,
   discoverLockfile,
   registerPhase1Agents,
 } from './agent-registration.js';
+import { constructLoopDriver } from './ai-provider-factory.js';
+import { parseLoopCliOptions } from './loop-cli-options.js';
 import { registerReadOnlyTools } from './tool-registration.js';
 import type { AgentExecutionContext, AgentLogger } from '../types/agent.js';
 import type { ProviderId } from '../types/identity.js';
@@ -141,6 +148,13 @@ export interface ScanOptions {
   // Step 2.11 codex retro: Mode B flags.
   readonly supabaseSandbox?: string;
   readonly supabaseServiceRoleKey?: string;
+  /**
+   * Step 40c-v3 addendum (originally Step 40): env-var NAME for the Supabase
+   * anon key the Mode B sign-in path needs. The anon key is NOT a secret per
+   * Supabase docs, but env-var-NAME-on-argv is symmetric with
+   * `--supabase-service-role-key`. The value never appears on argv.
+   */
+  readonly supabaseAnonKey?: string;
   readonly approveActive?: boolean;
   readonly ci?: boolean;
   readonly approvalFile?: string;
@@ -150,6 +164,13 @@ export interface ScanOptions {
   readonly aiConcernThreshold?: string;
   readonly aiCacheTtl?: string;
   readonly aiModel?: string;
+  /**
+   * Step 31d: agentic-loop budget overrides (e.g.
+   * `calls=40,wall_ms=300000,cost=2000000,steps=200`). Forwarded to
+   * `parseLoopCliOptions` so the credential-on-argv guard fires through the
+   * real `scan` command.
+   */
+  readonly loopBudget?: string;
 }
 
 export interface ValidatedScanInputs {
@@ -212,6 +233,19 @@ export interface ValidatedScanInputs {
   readonly aiConcernThreshold: AiConcernThreshold;
   readonly aiCacheTtl: AiCacheTtl;
   readonly aiModel: string;
+  /**
+   * Step 31d: raw `--loop-budget` value (e.g. `calls=40,wall_ms=300000`)
+   * threaded through validation so the Bedrock loop branch parses it via
+   * `parseLoopCliOptions` (which also runs the credential-on-argv guard).
+   */
+  readonly loopBudget?: string;
+  /**
+   * Step 40c-v3 Mode B fields. Populated by `validateScanOptions` only when
+   * Mode B was selected; carried through to `runBedrockLoopBranchModeB`.
+   */
+  readonly supabaseSandboxProjectRef?: string;
+  readonly supabaseServiceRoleEnvVarName?: string;
+  readonly supabaseAnonKeyEnvVarName?: string;
 }
 
 export interface StatLike {
@@ -247,6 +281,14 @@ export interface ScanCommandDeps {
    * `process.env[name]`.
    */
   readonly envReader: (name: string) => string | undefined;
+  /**
+   * Step 31d codex §6.5-r2 SHOULD #1: raw argv provider for the
+   * credential-on-argv guard inside the Bedrock loop branch. Production
+   * callers leave this undefined and `defaultScanCommandDeps` wires it to
+   * `() => process.argv.slice(2)`; tests inject a fake array so V5a fires
+   * deterministically without mutating `process.argv` globally.
+   */
+  readonly rawArgvProvider?: () => readonly string[];
   /**
    * Provider registry — resolves `--ai-provider <name>` to an
    * availability record (per FPP §2A). Tests inject custom registries
@@ -331,6 +373,29 @@ export async function validateScanOptions(
         return err(
           new CliUsageError(
             `--supabase-service-role-key expects a SHOUTY_CASE env-var NAME; got "${options.supabaseServiceRoleKey}"`,
+          ),
+        );
+      }
+    }
+    // Step 40c-v3 — same name/value discipline for `--supabase-anon-key`:
+    // accept only a SHOUTY_CASE env var name; refuse anything that looks
+    // like a key value on argv.
+    if (
+      options.supabaseAnonKey !== undefined &&
+      options.supabaseAnonKey.length > 0
+    ) {
+      const modB = await import('./mode-b.js');
+      if (modB.looksLikeKeyValue(options.supabaseAnonKey)) {
+        return err(
+          new CliUsageError(
+            '--supabase-anon-key takes the NAME of an env var, not the key value. Set the env var (e.g. VEYRA_SUPABASE_ANON_KEY) and pass --supabase-anon-key VEYRA_SUPABASE_ANON_KEY.',
+          ),
+        );
+      }
+      if (!modB.isValidEnvVarName(options.supabaseAnonKey)) {
+        return err(
+          new CliUsageError(
+            `--supabase-anon-key expects a SHOUTY_CASE env-var NAME; got "${options.supabaseAnonKey}"`,
           ),
         );
       }
@@ -520,6 +585,24 @@ export async function validateScanOptions(
     aiConcernThreshold: ai.aiConcernThreshold,
     aiCacheTtl: ai.aiCacheTtl,
     aiModel: ai.aiModel,
+    ...(options.loopBudget !== undefined
+      ? { loopBudget: options.loopBudget }
+      : {}),
+    // Step 40c-v3 Mode B fields — only populated when Mode B was selected
+    // (validated above). The Bedrock Mode B branch reads them; topo path
+    // continues to read the individual options fields directly.
+    ...(options.mode === 'sandbox_active_validation' &&
+    options.supabaseSandbox !== undefined
+      ? { supabaseSandboxProjectRef: options.supabaseSandbox }
+      : {}),
+    ...(options.mode === 'sandbox_active_validation' &&
+    options.supabaseServiceRoleKey !== undefined
+      ? { supabaseServiceRoleEnvVarName: options.supabaseServiceRoleKey }
+      : {}),
+    ...(options.mode === 'sandbox_active_validation' &&
+    options.supabaseAnonKey !== undefined
+      ? { supabaseAnonKeyEnvVarName: options.supabaseAnonKey }
+      : {}),
   };
   return ok(validated);
 }
@@ -612,6 +695,30 @@ function validateAiOptions(
     }
     if (entry.availability.kind === 'deferred') {
       return err(new CliUsageError(entry.availability.deferredMessage));
+    }
+    // Step 31d: SDK-chain-resolved providers (Bedrock) — the actual identity
+    // resolution happens at runtime in the provider's `auth.ts`. Here we only
+    // confirm each any-of env group has at least one var set.
+    if (entry.availability.kind === 'available_via_sdk_chain') {
+      for (const group of entry.availability.requiredAnyOfEnv) {
+        const someSet = group.some((name) => {
+          const v = deps.envReader(name);
+          return v !== undefined && v.length > 0;
+        });
+        if (!someSet) {
+          return err(
+            new CliUsageError(
+              `--ai-provider ${options.aiProvider}: one of ${group.join('/')} must be set (the SDK chain resolves credentials at runtime; region is the only env var the CLI requires)`,
+            ),
+          );
+        }
+      }
+      return ok({
+        aiDisabled: false,
+        aiOptIn: true,
+        aiProvider: entry.id,
+        ...knobs,
+      });
     }
     // Available provider + AI on: env-var must be present.
     const envValue = deps.envReader(entry.availability.envVarName);
@@ -836,7 +943,11 @@ export async function runScan(
     logger: deps.logger,
   };
 
-  const orchestrator = deps.orchestratorFactory();
+  // Step 31d MUST #3: orchestrator construction MOVED below the Bedrock loop
+  // branch. The topo path needs it; the Bedrock branch returns before reaching
+  // `orchestrator.run(...)` and must NOT call `deps.orchestratorFactory()` —
+  // V16 asserts the spy factory is never invoked on the Bedrock route.
+
   // Step 23 Bug C + Bug D: auto-discover the bundled `rules/` and any
   // lockfile under projectRoot so semgrep + OSV adapters get the
   // inputs they need without the customer passing extra flags.
@@ -979,6 +1090,81 @@ export async function runScan(
       };
     }
   }
+
+  // ─────────── Step 31d: Bedrock + Mode A → agentic-loop runtime route ───────
+  // Single decision point. When all three conditions hold, the new branch
+  // runs and returns; every other combination falls through to the unchanged
+  // topo-sort path below.
+  if (
+    inputs.aiOptIn &&
+    inputs.aiProvider !== undefined &&
+    String(inputs.aiProvider) === 'bedrock' &&
+    inputs.mode === 'read_only_evidence'
+  ) {
+    // Step 40d: synthesize the pre-loop project briefing BEFORE the Mode A
+    // dispatch so the AI driver sees `view.briefing` on every `proposeNext`.
+    // Both Mode A and Mode B branches consume the same briefing helper —
+    // Decision H1 guarantees inventory is built BEFORE briefing in both.
+    const briefingBundle = await synthesizeBriefingForLoop({
+      projectRoot: inputs.projectRoot,
+      artifactDir,
+      aiOptIn: inputs.aiOptIn,
+      modelId: inputs.aiModel,
+      envReader: deps.envReader,
+      providerId: inputs.aiProvider,
+    });
+    return runBedrockLoopBranch({
+      inputs,
+      deps,
+      policy,
+      scanId,
+      artifactDir,
+      supabaseMcpClient,
+      discoveredLockfile,
+      ...(briefingBundle.briefing !== undefined ? { briefing: briefingBundle.briefing } : {}),
+      ...(briefingBundle.digest !== undefined ? { briefingDigest: briefingBundle.digest } : {}),
+    });
+  }
+
+  // Step 40c-v3 — Bedrock + Mode B (sandbox_active_validation) runtime route.
+  // Replaces the Step 31d Cut-3 reject. The branch synthesizes a sandbox
+  // actor, establishes their session via the anon-key Auth client, runs the
+  // AI-driven IDOR probe against PostgREST, and reverse-walks cleanup
+  // (signOut → deleteUser per actor) in a try/finally.
+  if (
+    inputs.aiOptIn &&
+    inputs.aiProvider !== undefined &&
+    String(inputs.aiProvider) === 'bedrock' &&
+    inputs.mode === 'sandbox_active_validation'
+  ) {
+    // Step 40d: same pre-loop briefing helper as Mode A. Decision H1
+    // guarantees `inventory-bootstrap.json` exists before synthesis runs in
+    // either branch.
+    const briefingBundle = await synthesizeBriefingForLoop({
+      projectRoot: inputs.projectRoot,
+      artifactDir,
+      aiOptIn: inputs.aiOptIn,
+      modelId: inputs.aiModel,
+      envReader: deps.envReader,
+      providerId: inputs.aiProvider,
+    });
+    return runBedrockLoopBranchModeB({
+      inputs,
+      deps,
+      policy,
+      scanId,
+      artifactDir,
+      supabaseMcpClient,
+      discoveredLockfile,
+      ...(briefingBundle.briefing !== undefined ? { briefing: briefingBundle.briefing } : {}),
+      ...(briefingBundle.digest !== undefined ? { briefingDigest: briefingBundle.digest } : {}),
+    });
+  }
+
+  // Step 31d MUST #3: orchestrator construction lives HERE (below the Bedrock
+  // branch). The topo-sort path consumes it; the Bedrock branch returns above
+  // without ever calling the factory.
+  const orchestrator = deps.orchestratorFactory();
 
   registerPhase1Agents(orchestrator, {
     ...(inputs.supabaseSchemaPath !== undefined
@@ -1162,6 +1348,828 @@ export async function runScan(
   return ok({ exitCode });
 }
 
+// ──────────── Step 31d: Bedrock + Mode A agentic-loop branch ────────────────
+//
+// Runs when `inputs.aiOptIn && inputs.aiProvider === 'bedrock' && inputs.mode
+// === 'read_only_evidence'`. All other flag combinations fall through to the
+// existing topo-sort orchestrator path above — no behaviour change there.
+
+interface BedrockLoopBranchArgs {
+  readonly inputs: ValidatedScanInputs;
+  readonly deps: ScanCommandDeps;
+  readonly policy: ValidationPolicy;
+  readonly scanId: string;
+  readonly artifactDir: string;
+  readonly supabaseMcpClient: import('../connectors/supabase/client.js').SupabaseClient | undefined;
+  readonly discoveredLockfile: string | undefined;
+  /**
+   * Step 40d: pre-loop project briefing synthesized once before either Mode A
+   * or Mode B branch dispatches. Both branches thread it into the
+   * `runAgenticLoop` deps so the AI driver sees `view.briefing` on every
+   * `proposeNext` call. Absent when synthesis failed catastrophically.
+   */
+  readonly briefing?: import('./briefing/types.js').ProjectBriefing;
+  readonly briefingDigest?: string;
+}
+
+async function runBedrockLoopBranch(
+  args: BedrockLoopBranchArgs,
+): Promise<Result<{ readonly exitCode: number }, CliUsageError>> {
+  const { inputs, deps, policy, scanId, artifactDir } = args;
+
+  // Step 31d: `--json` on the agentic path is deferred to Cut 2 / Step 37.
+  if (inputs.jsonPath !== undefined) {
+    return err(
+      new CliUsageError(
+        'JSON output is not yet wired on the agentic path (Cut 2 / Step 37 follow-up). Rerun without --json or pick a non-Bedrock provider.',
+      ),
+    );
+  }
+
+  // Parse loop-options (also runs the credential-on-argv guard against the
+  // real argv array — Step 31d V5a). Codex §6.5-r2 SHOULD #1: read argv from
+  // `deps.rawArgvProvider` (injected) instead of `process.argv` directly,
+  // so V5a is testable without touching `process.argv` globally.
+  const rawArgv =
+    deps.rawArgvProvider !== undefined
+      ? [...deps.rawArgvProvider()]
+      : [...process.argv.slice(2)];
+  const loopOpts = parseLoopCliOptions({
+    env: inputs.env,
+    ...(inputs.loopBudget !== undefined ? { loopBudget: inputs.loopBudget } : {}),
+    rawArgv,
+  });
+  if (!loopOpts.ok) {
+    return err(new CliUsageError(loopOpts.error.message));
+  }
+  // Note: a Mode B reject used to live here, but the outer guard at the
+  // single decision point already ensures `inputs.mode === 'read_only_evidence'`
+  // when this branch runs (§6.5 round-1 review SHOULD #1). When Cut 3 wires
+  // Mode B on the Bedrock loop path, that branch will be a separate routing
+  // arm — not a guard inside this one.
+
+  // Build the registry via the SAME function the structural lint and the
+  // import-graph guard validate (Step 33 / Step 35 / V11 / V15).
+  const registry = createToolRegistry();
+  if (deps.registerTools !== undefined) {
+    deps.registerTools(registry, {
+      rulesPath: bundledRulesDir(),
+      ...(args.discoveredLockfile !== undefined
+        ? { lockfilePath: args.discoveredLockfile }
+        : {}),
+      ...(args.supabaseMcpClient !== undefined
+        ? { supabaseClient: args.supabaseMcpClient }
+        : {}),
+      ...(deps.scannerRunnersOverride !== undefined
+        ? { runners: deps.scannerRunnersOverride }
+        : {}),
+    });
+  }
+
+  // Build the loop driver (Bedrock — live transport OR recorded fixture per
+  // `VEYRA_BEDROCK_RECORDING`).
+  let driver;
+  try {
+    const built = await constructLoopDriver({
+      providerId: inputs.aiProvider!,
+      envReader: deps.envReader,
+      defaultModelId: inputs.aiModel,
+    });
+    driver = built.driver;
+  } catch (cause) {
+    const m = cause instanceof Error ? cause.message : String(cause);
+    return err(new CliUsageError(m));
+  }
+
+  const toolContext = {
+    scanId,
+    projectPath: inputs.projectRoot,
+    artifactDir,
+  };
+
+  const loopFactory = deps.loopFactory ?? runAgenticLoop;
+  // Step 35b: inject the per-control predicate registry as the loop's
+  // `runFloor` deps. The registry lives in `src/cli/floor-predicates.ts`
+  // (NOT `src/core/`) so the no-cross-layer-imports invariant stays green;
+  // the floor accepts predicates as an injected parameter.
+  const { FLOOR_PREDICATES } = await import('./floor-predicates.js');
+  const { runClassificationPredicates } = await import(
+    '../core/orchestrator/floor.js'
+  );
+  const result = await loopFactory({
+    registry,
+    aiDriver: driver,
+    policy,
+    context: toolContext,
+    artifactDir,
+    ...(Object.keys(loopOpts.value.loopBudget).length > 0
+      ? { caps: loopOpts.value.loopBudget }
+      : {}),
+    requiredModelId: inputs.aiModel,
+    runFloor: (facts, gaps) =>
+      runClassificationPredicates(facts, gaps, FLOOR_PREDICATES),
+    ...(args.briefing !== undefined ? { briefing: args.briefing } : {}),
+    ...(args.briefingDigest !== undefined ? { briefingDigest: args.briefingDigest } : {}),
+  });
+
+  // Bridge the loop result → markdown reporter.
+  const trace: LoopTraceSummary = summariseRecords(
+    result.state.records(),
+    result.budget_snapshot,
+  );
+  const markdown = renderAgenticReport({
+    narrative_prose:
+      result.findings.length === 0
+        ? 'Findings were checked; none appear launch-blocking.'
+        : `${String(result.findings.length)} finding(s) need human review.`,
+    findings: result.findings,
+    ledger_missing: result.ledgerMissing,
+    trace,
+    narrative_used_fallback: true,
+    ...(args.briefing !== undefined
+      ? {
+          project_briefing_ref: {
+            basename: 'project-briefing.json',
+            degraded: args.briefing.synthesis_mode === 'degraded_fallback',
+          },
+        }
+      : {}),
+  });
+  try {
+    await fs.mkdir(path.dirname(inputs.outPath), { recursive: true });
+    await fs.writeFile(inputs.outPath, markdown, 'utf8');
+  } catch (cause) {
+    const m = cause instanceof Error ? cause.message : String(cause);
+    return err(new CliUsageError(`failed to write report to ${inputs.outPath}: ${m}`));
+  }
+
+  // --fail-on-blocker — exit non-zero when any finding is fix_before_launch.
+  let exitCode = 0;
+  if (inputs.failOnBlocker) {
+    const hasBlocker = result.findings.some(
+      (f) => f.review_action === 'fix_before_launch',
+    );
+    if (hasBlocker) exitCode = 1;
+  }
+  return ok({ exitCode });
+}
+
+// ── Step 40c-v3 — Bedrock + Mode B (active-validation) runtime branch ──────
+//
+// Synthesizes an actor, signs them in, runs the AI-driven IDOR probe against
+// the user's Supabase sandbox PostgREST surface, reverse-walks cleanup in
+// `try / finally`. JWT + password live in the in-process ActorSecretRegistry;
+// only digests persist (Decision G.2). Mode B argv gates (`--approve-active`,
+// `--supabase-sandbox`, `--supabase-service-role-key`, `--supabase-anon-key`,
+// optional `--ci`/`--approval-file`) ran in `validateScanOptions` BEFORE this
+// branch is reached.
+async function runBedrockLoopBranchModeB(
+  args: BedrockLoopBranchArgs,
+): Promise<Result<{ readonly exitCode: number }, CliUsageError>> {
+  const { inputs, deps, policy, scanId, artifactDir } = args;
+
+  if (inputs.jsonPath !== undefined) {
+    return err(
+      new CliUsageError(
+        'JSON output is not yet wired on the agentic path (Cut 2 / Step 37 follow-up). Rerun without --json.',
+      ),
+    );
+  }
+
+  // Resolve required Mode B inputs.
+  if (
+    inputs.supabaseSandboxProjectRef === undefined ||
+    inputs.supabaseServiceRoleEnvVarName === undefined ||
+    inputs.supabaseAnonKeyEnvVarName === undefined
+  ) {
+    return err(
+      new CliUsageError(
+        '--ai-provider bedrock --mode sandbox_active_validation requires --supabase-sandbox <project_ref>, --supabase-service-role-key <ENV_VAR>, and --supabase-anon-key <ENV_VAR>.',
+      ),
+    );
+  }
+  const srk = deps.envReader(inputs.supabaseServiceRoleEnvVarName);
+  const anonKey = deps.envReader(inputs.supabaseAnonKeyEnvVarName);
+  if (srk === undefined || srk.length === 0) {
+    return err(
+      new CliUsageError(
+        `--supabase-service-role-key names env var "${inputs.supabaseServiceRoleEnvVarName}" but it is unset in the environment.`,
+      ),
+    );
+  }
+  if (anonKey === undefined || anonKey.length === 0) {
+    return err(
+      new CliUsageError(
+        `--supabase-anon-key names env var "${inputs.supabaseAnonKeyEnvVarName}" but it is unset in the environment.`,
+      ),
+    );
+  }
+
+  // Loop-budget + raw-argv guard (Step 31d V4 + V5a — same path as Mode A).
+  const rawArgv =
+    deps.rawArgvProvider !== undefined
+      ? [...deps.rawArgvProvider()]
+      : [...process.argv.slice(2)];
+  const loopOpts = parseLoopCliOptions({
+    env: inputs.env,
+    ...(inputs.loopBudget !== undefined ? { loopBudget: inputs.loopBudget } : {}),
+    rawArgv,
+  });
+  if (!loopOpts.ok) {
+    return err(new CliUsageError(loopOpts.error.message));
+  }
+
+  // Lazy imports — keep Mode A and `--no-ai` paths free of these modules.
+  const [
+    { WriteRegistry },
+    { ActorSecretRegistry: ActorSecretRegistryClass },
+    { createSupabaseAdminClient },
+    { createSupabaseAuthClient },
+    { createDefaultProbeHttpTransport },
+    { registerActiveValidationTools },
+    { runClassificationPredicates },
+    { FLOOR_PREDICATES },
+  ] = await Promise.all([
+    import('../core/sandbox/http-write-registry.js'),
+    import('../core/sandbox/actor-secret-registry.js'),
+    import('../connectors/supabase/admin/client.js'),
+    import('../connectors/supabase/auth/client.js'),
+    import('../scanners/probe-http/tool.js'),
+    import('./tool-registration.js'),
+    import('../core/orchestrator/floor.js'),
+    import('./floor-predicates.js'),
+  ]);
+
+  const writeRegistry = new WriteRegistry();
+  const actorSecretRegistry = new ActorSecretRegistryClass();
+
+  let adminClient;
+  try {
+    adminClient = createSupabaseAdminClient({
+      projectRef: inputs.supabaseSandboxProjectRef,
+      serviceRoleKey: srk,
+      // Codex §6.5 MF-4: pass read-only project refs so the admin client
+      // refuses to operate on the same project the read-only scan reads from.
+      // Sandbox MUST be a distinct Supabase project.
+      ...(inputs.supabaseProjectRef !== undefined
+        ? { readOnlyProjectRefs: [inputs.supabaseProjectRef] }
+        : {}),
+    });
+  } catch (cause) {
+    const m = cause instanceof Error ? cause.message : String(cause);
+    return err(new CliUsageError(`supabase-admin setup failed: ${m}`));
+  }
+  const authClient = createSupabaseAuthClient({
+    apiUrl: `https://${inputs.supabaseSandboxProjectRef}.supabase.co`,
+    anonKey,
+  });
+  const probeHttpTransport = createDefaultProbeHttpTransport();
+
+  // Build registry: read-only + active validation.
+  const registry = createToolRegistry();
+  if (deps.registerTools !== undefined) {
+    deps.registerTools(registry, {
+      rulesPath: bundledRulesDir(),
+      ...(args.discoveredLockfile !== undefined
+        ? { lockfilePath: args.discoveredLockfile }
+        : {}),
+      ...(args.supabaseMcpClient !== undefined
+        ? { supabaseClient: args.supabaseMcpClient }
+        : {}),
+      ...(deps.scannerRunnersOverride !== undefined
+        ? { runners: deps.scannerRunnersOverride }
+        : {}),
+    });
+  }
+  // Codex §6.5 MF-1 — record probe attempts via a mutable counter the
+  // descriptor's closure can bump. Persisted to `http-write-registry.json`
+  // after the loop completes (the loop's `state.probeAttemptCount()` ledger
+  // predicate is also satisfied by counting probe-http entries in the write
+  // registry post-hoc; see ledgerMissingFiltered below).
+  let probeAttemptCounter = 0;
+  const probeAttemptForwarder = (): void => {
+    probeAttemptCounter += 1;
+  };
+  registerActiveValidationTools(registry, {
+    writeRegistry,
+    actorSecretRegistry,
+    adminClient,
+    authClient,
+    probeHttpTransport,
+    baseUrl: `https://${inputs.supabaseSandboxProjectRef}.supabase.co`,
+    anonKey,
+    scanId,
+    recordProbeAttempt: probeAttemptForwarder,
+  });
+
+  // Build the loop driver.
+  let driver;
+  try {
+    const built = await constructLoopDriver({
+      providerId: inputs.aiProvider!,
+      envReader: deps.envReader,
+      defaultModelId: inputs.aiModel,
+    });
+    driver = built.driver;
+  } catch (cause) {
+    const m = cause instanceof Error ? cause.message : String(cause);
+    return err(new CliUsageError(m));
+  }
+
+  const toolContext = { scanId, projectPath: inputs.projectRoot, artifactDir };
+  const loopFactory = deps.loopFactory ?? runAgenticLoop;
+
+  // try/finally cleanup — codex round-2 MF-4 + V4b.
+  let result: import('../core/orchestrator/agentic-loop.js').AgenticLoopResult | undefined;
+  let runError: Error | undefined;
+  try {
+    result = await loopFactory({
+      registry,
+      aiDriver: driver,
+      policy,
+      context: toolContext,
+      artifactDir,
+      ...(Object.keys(loopOpts.value.loopBudget).length > 0
+        ? { caps: loopOpts.value.loopBudget }
+        : {}),
+      requiredModelId: inputs.aiModel,
+      runFloor: (facts, gaps) =>
+        runClassificationPredicates(facts, gaps, FLOOR_PREDICATES),
+      ...(args.briefing !== undefined ? { briefing: args.briefing } : {}),
+      ...(args.briefingDigest !== undefined ? { briefingDigest: args.briefingDigest } : {}),
+    });
+  } catch (cause) {
+    runError = cause instanceof Error ? cause : new Error(String(cause));
+  } finally {
+    // Reverse-walk cleanup BOTH paths. Cleanup executors must not throw out.
+    const cleanupExecutors = {
+      http: async (entry: import('../core/sandbox/http-write-registry.js').WriteEntry): Promise<void> => {
+        // probe-http records audit-only; the registry no-ops on those.
+        // Non-audit HTTP writes don't ship in this step (cc-11-3 IDOR is GET).
+        void entry;
+      },
+      admin: async (entry: import('../core/sandbox/http-write-registry.js').WriteEntry): Promise<void> => {
+        // resource_id format: `supabase-admin:user:<uid>` (synthesize-actor) OR
+        // `supabase-auth:session:<actor_id>` (establish-actor-session).
+        if (entry.resource_id.startsWith('supabase-auth:session:')) {
+          const actorId = entry.resource_id.slice('supabase-auth:session:'.length);
+          const secret = actorSecretRegistry.get(actorId);
+          // Use the JWT for signOut if available (Decision G.4); fall back
+          // to UID if JWT was wiped or never set.
+          const tokenOrUid = secret?.access_token ?? actorId;
+          const r = await adminClient.signOutUser(tokenOrUid);
+          if (!r.ok) throw r.error;
+        } else if (entry.resource_id.startsWith('supabase-admin:user:')) {
+          const uid = entry.resource_id.slice('supabase-admin:user:'.length);
+          const r = await adminClient.deleteUser(uid);
+          if (!r.ok) throw r.error;
+        }
+      },
+    };
+    const cleanupProof = await writeRegistry.reverseWalk(cleanupExecutors);
+    // Persist cleanup-proof artifact for V19 visibility.
+    try {
+      await fs.mkdir(artifactDir, { recursive: true });
+      await fs.writeFile(
+        path.join(artifactDir, 'cleanup-proof.json'),
+        JSON.stringify(cleanupProof, null, 2),
+        'utf8',
+      );
+    } catch {
+      // Best-effort; the report still renders.
+    }
+    // V21 — wipe the actor secret registry on success AND on crash.
+    actorSecretRegistry.clearAll();
+  }
+
+  if (runError !== undefined) {
+    return err(new CliUsageError(`Mode B loop crashed: ${runError.message}`));
+  }
+  if (result === undefined) {
+    return err(new CliUsageError('Mode B loop returned no result'));
+  }
+
+  // Codex §6.5 MF-1 — persist `http-write-registry.json` from the WriteRegistry
+  // contents so `hasArtifact('http-write-registry.json')` ledger predicate
+  // fires. Also filter `declared_probe_attempted` out of ledgerMissing when
+  // we observed at least one probe-http call (the §K predicate also wants
+  // `probeAttemptCount() >= 1`; we count via the registry).
+  try {
+    await fs.mkdir(artifactDir, { recursive: true });
+    await fs.writeFile(
+      path.join(artifactDir, 'http-write-registry.json'),
+      JSON.stringify(writeRegistry.list(), null, 2),
+      'utf8',
+    );
+  } catch {
+    // Best-effort; the report still renders.
+  }
+  const probeAttempts = probeAttemptCounter;
+  const ledgerMissingFiltered =
+    probeAttempts >= 1
+      ? result.ledgerMissing.filter(
+          (g) => g.baseline_item_id !== 'declared_probe_attempted',
+        )
+      : result.ledgerMissing;
+
+  // Codex §6.5 MF-2 — promote cleanup failures to launch-blocking finding.
+  // The reverse-walk in the `finally` block above produced a CleanupProof;
+  // re-read it from disk for the finding builder.
+  let cleanupFindings: readonly import('../types/finding.js').Finding[] = [];
+  try {
+    const proofRaw = await fs.readFile(
+      path.join(artifactDir, 'cleanup-proof.json'),
+      'utf8',
+    );
+    const proof = JSON.parse(proofRaw) as import('../core/sandbox/http-write-registry.js').CleanupProof;
+    if (proof.residual_count > 0) {
+      const { cleanupFailedFinding } = await import(
+        '../core/sandbox/cleanup-failed-finding.js'
+      );
+      cleanupFindings = [cleanupFailedFinding(proof)];
+    }
+  } catch {
+    // No cleanup-proof file (best-effort persist) — skip the finding.
+  }
+
+  // Codex §6.5 MF-3 — build active_outcomes rows from the loop's accepted
+  // probe_response facts so the renderer surfaces per-probe outcomes,
+  // not just trace counts. classifyProbe is deterministic.
+  const { classifyProbe } = await import(
+    '../agents/sandbox-runner/outcome-classifier.js'
+  );
+  const activeOutcomes: import('../reporters/markdown/agentic-report.js').ActiveOutcomeRow[] =
+    [];
+  for (const fact of result.facts) {
+    // facts may be NamedFact[] (loop shape) — match by the source_fields
+    // structure if present. For audit simplicity here we read the source
+    // payload via the bridge-decoded result instead by iterating over
+    // result.state's accepted facts. The result.facts list is already a
+    // flat NamedFact array per the loop contract; we rebuild
+    // ProbeObservations by name lookups.
+    if (typeof fact.value !== 'object' || fact.value === null) continue;
+    if (!Array.isArray(fact.value)) continue;
+    // Find the source_kind = 'probe_response' marker.
+    const fields = new Map<string, unknown>();
+    for (const f of fact.value as ReadonlyArray<{ name: string; value: unknown }>) {
+      fields.set(f.name, f.value);
+    }
+    if (fields.get('source_kind') !== 'probe_response') continue;
+    const sourceFieldsRaw = fields.get('source_fields');
+    if (!Array.isArray(sourceFieldsRaw)) continue;
+    const srcFields = new Map<string, unknown>();
+    for (const f of sourceFieldsRaw as ReadonlyArray<{
+      name: string;
+      value: unknown;
+    }>) {
+      srcFields.set(f.name, f.value);
+    }
+    const probeId = srcFields.get('probe_id');
+    const controlId = srcFields.get('control_id');
+    const payloadRaw = srcFields.get('payload');
+    if (
+      typeof probeId !== 'string' ||
+      typeof controlId !== 'string' ||
+      !Array.isArray(payloadRaw)
+    )
+      continue;
+    const payloadFields = new Map<string, unknown>();
+    for (const f of payloadRaw as ReadonlyArray<{ name: string; value: unknown }>) {
+      payloadFields.set(f.name, f.value);
+    }
+    const status = payloadFields.get('response_status');
+    const returnedRows = payloadFields.get('response_returned_rows');
+    const expectation = payloadFields.get('expectation');
+    if (
+      typeof status !== 'number' ||
+      typeof returnedRows !== 'boolean' ||
+      (expectation !== 'expect_denial' && expectation !== 'expect_allow')
+    )
+      continue;
+    const outcome = classifyProbe({
+      probe_id: probeId,
+      control_id: controlId,
+      response_status: status,
+      response_returned_rows: returnedRows,
+      expectation,
+    });
+    activeOutcomes.push({
+      probe_id: probeId,
+      control_id: controlId,
+      outcome,
+      expectation,
+    });
+  }
+
+  // Bridge to markdown reporter.
+  const allFindings: readonly import('../types/finding.js').Finding[] = [
+    ...cleanupFindings,
+    ...result.findings,
+  ];
+  const trace: LoopTraceSummary = summariseRecords(
+    result.state.records(),
+    result.budget_snapshot,
+  );
+  const markdown = renderAgenticReport({
+    narrative_prose:
+      allFindings.length === 0
+        ? 'Findings were checked; none appear launch-blocking.'
+        : `${String(allFindings.length)} finding(s) need human review.`,
+    findings: allFindings,
+    ledger_missing: ledgerMissingFiltered,
+    trace,
+    narrative_used_fallback: true,
+    ...(activeOutcomes.length > 0 ? { active_outcomes: activeOutcomes } : {}),
+    ...(args.briefing !== undefined
+      ? {
+          project_briefing_ref: {
+            basename: 'project-briefing.json',
+            degraded: args.briefing.synthesis_mode === 'degraded_fallback',
+          },
+        }
+      : {}),
+  });
+  try {
+    await fs.mkdir(path.dirname(inputs.outPath), { recursive: true });
+    await fs.writeFile(inputs.outPath, markdown, 'utf8');
+  } catch (cause) {
+    const m = cause instanceof Error ? cause.message : String(cause);
+    return err(new CliUsageError(`failed to write report to ${inputs.outPath}: ${m}`));
+  }
+
+  let exitCode = 0;
+  if (inputs.failOnBlocker) {
+    const hasBlocker = allFindings.some(
+      (f) => f.review_action === 'fix_before_launch',
+    );
+    if (hasBlocker) exitCode = 1;
+  }
+  return ok({ exitCode });
+}
+
+function summariseRecords(
+  records: ReadonlyArray<import('../core/orchestrator/artifact-state.js').LoopRecord>,
+  budget_consumed: import('../core/orchestrator/loop-budget.js').BudgetSnapshot,
+): LoopTraceSummary {
+  let tools_called = 0;
+  let denials = 0;
+  let arg_rejects = 0;
+  let tool_errors = 0;
+  let result_rejects = 0;
+  let subagent_errors = 0;
+  for (const r of records) {
+    switch (r.kind) {
+      case 'tool_accepted':
+        tools_called += 1;
+        break;
+      case 'denial':
+      case 'out_of_scope':
+      case 'spawn_denial':
+        denials += 1;
+        break;
+      case 'arg_reject':
+        arg_rejects += 1;
+        break;
+      case 'tool_error':
+        tool_errors += 1;
+        break;
+      case 'tool_result_reject':
+        result_rejects += 1;
+        break;
+      case 'subagent_error':
+        subagent_errors += 1;
+        break;
+      default:
+        // other kinds (done, early_done, budget_halt, stall_halt,
+        // driver_error, invalid_proposal, unknown_tool) don't count toward
+        // this summary's six counters.
+        break;
+    }
+  }
+  return {
+    tools_called,
+    denials,
+    arg_rejects,
+    tool_errors,
+    result_rejects,
+    subagent_errors,
+    budget_consumed,
+  };
+}
+
+// ─── Step 40d: pre-loop project briefing helper ────────────────────────────
+//
+// Synthesizes the briefing once, before either Mode A or Mode B Bedrock
+// branch dispatches. Both branches receive the same briefing bundle.
+//
+//   - Decision B: the synthesizer lives under `src/cli/briefing/` so its
+//     impl can import from `src/agents/product-understanding/inventory/`
+//     without violating the no-cross-layer-imports invariant.
+//   - Decision H1: if `<artifactDir>/inventory-bootstrap.json` is absent
+//     at briefing time, the helper builds + persists inventory FIRST and
+//     proceeds.
+//   - Decision E: AI-call failure → `degraded_fallback` briefing; the
+//     loop continues.
+
+export interface SynthesizeBriefingForLoopOptions {
+  readonly projectRoot: string;
+  readonly artifactDir: string;
+  readonly aiOptIn: boolean;
+  readonly modelId: string | undefined;
+  readonly envReader: (name: string) => string | undefined;
+  readonly providerId: ProviderId | undefined;
+  /**
+   * Test seam: pre-built caller (e.g. `recordedBriefingBedrockCaller(...)`).
+   * Production paths leave undefined → the helper constructs a live or
+   * recorded caller per `VEYRA_BEDROCK_RECORDING`.
+   */
+  readonly briefingCaller?: import('./briefing/types.js').BriefingBedrockCaller;
+}
+
+export interface BriefingBundle {
+  readonly briefing?: import('./briefing/types.js').ProjectBriefing;
+  readonly digest?: string;
+}
+
+export async function synthesizeBriefingForLoop(
+  opts: SynthesizeBriefingForLoopOptions,
+): Promise<BriefingBundle> {
+  const [
+    { buildBootstrapInventory, INVENTORY_BOOTSTRAP_ARTIFACT_NAME, writeInventoryArtifact },
+    { synthesizeProjectBriefing },
+    { writeBriefingArtifact, briefingDigest },
+  ] = await Promise.all([
+    import('../agents/product-understanding/inventory/bootstrap.js'),
+    import('./briefing/synthesize.js'),
+    import('./briefing/persist.js'),
+  ]);
+
+  const inventoryPath = path.join(opts.artifactDir, INVENTORY_BOOTSTRAP_ARTIFACT_NAME);
+  // Decision H1: build + persist inventory pre-briefing if absent.
+  let inventory:
+    | import('../agents/product-understanding/inventory/types.js').InventoryBootstrap
+    | undefined;
+  try {
+    const text = await fs.readFile(inventoryPath, 'utf8');
+    inventory = JSON.parse(text) as import('../agents/product-understanding/inventory/types.js').InventoryBootstrap;
+  } catch {
+    // not yet on disk — build it now
+  }
+  if (inventory === undefined) {
+    const r = await buildBootstrapInventory({ projectRoot: opts.projectRoot });
+    if (!r.ok) {
+      // Inventory failure → return empty bundle. The loop still runs (no
+      // briefing) — this is the same degraded path as if the operator never
+      // opted into briefing.
+      return {};
+    }
+    inventory = r.value;
+    const persistR = await writeInventoryArtifact(opts.artifactDir, inventory);
+    void persistR;
+  }
+
+  // Build the briefing caller (production wiring).
+  let caller = opts.briefingCaller;
+  if (caller === undefined && opts.aiOptIn && opts.modelId !== undefined) {
+    caller = await tryBuildBriefingCaller(opts);
+  }
+
+  const synthR = await synthesizeProjectBriefing({
+    inventory,
+    aiOptIn: opts.aiOptIn,
+    ...(caller !== undefined ? { bedrockCaller: caller } : {}),
+    ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+  });
+  if (!synthR.ok) {
+    return {};
+  }
+  const briefing = synthR.value;
+
+  // Persist artifact + compute digest.
+  const writeR = await writeBriefingArtifact(opts.artifactDir, briefing);
+  void writeR;
+  return { briefing, digest: briefingDigest(briefing) };
+}
+
+/**
+ * Build a production {@link BriefingBedrockCaller}. Three paths:
+ *   1. `VEYRA_BEDROCK_RECORDING=<dir>` set AND `<dir>/briefing-response.json`
+ *      exists → recorded-fixture caller (V1 determinism).
+ *   2. Live SDK call via lazy-imported `@aws-sdk/client-bedrock-runtime`.
+ *   3. Failure → return undefined; synthesizer routes to structural-only.
+ */
+async function tryBuildBriefingCaller(
+  opts: SynthesizeBriefingForLoopOptions,
+): Promise<import('./briefing/types.js').BriefingBedrockCaller | undefined> {
+  const recordingDir = opts.envReader('VEYRA_BEDROCK_RECORDING');
+  if (recordingDir !== undefined && recordingDir.length > 0) {
+    try {
+      const responsePath = path.join(recordingDir, 'briefing-response.json');
+      const text = await fs.readFile(responsePath, 'utf8');
+      const parsed = JSON.parse(text) as {
+        readonly parsed_output: unknown;
+        readonly model_id?: string;
+        readonly prompt_fingerprint_sha256?: string;
+        readonly cost_units?: number;
+      };
+      const { recordedBriefingBedrockCaller } = await import(
+        './briefing/synthesize.js'
+      );
+      return recordedBriefingBedrockCaller([
+        {
+          parsed_output: parsed.parsed_output,
+          model_id: parsed.model_id ?? opts.modelId ?? 'unknown',
+          ...(parsed.prompt_fingerprint_sha256 !== undefined
+            ? { prompt_fingerprint_sha256: parsed.prompt_fingerprint_sha256 }
+            : {}),
+          ...(parsed.cost_units !== undefined ? { cost_units: parsed.cost_units } : {}),
+        },
+      ]);
+    } catch {
+      // recording path missing or unreadable → fall through to live
+    }
+  }
+
+  // Live SDK path — guarded by `VEYRA_BEDROCK_LIVE=1` (Step 31b preventer 7).
+  if (opts.envReader('VEYRA_BEDROCK_LIVE') !== '1') {
+    return undefined;
+  }
+  return buildLiveBriefingCaller(opts);
+}
+
+async function buildLiveBriefingCaller(
+  opts: SynthesizeBriefingForLoopOptions,
+): Promise<import('./briefing/types.js').BriefingBedrockCaller | undefined> {
+  const region =
+    opts.envReader('AWS_REGION') ?? opts.envReader('AWS_DEFAULT_REGION');
+  if (region === undefined || region.length === 0) return undefined;
+  let sdk: {
+    readonly BedrockRuntimeClient: new (config: { region: string }) => {
+      readonly send: (cmd: unknown) => Promise<unknown>;
+    };
+    readonly ConverseCommand: new (input: unknown) => unknown;
+  };
+  try {
+    sdk = (await import('@aws-sdk/client-bedrock-runtime')) as unknown as {
+      readonly BedrockRuntimeClient: new (config: { region: string }) => {
+        readonly send: (cmd: unknown) => Promise<unknown>;
+      };
+      readonly ConverseCommand: new (input: unknown) => unknown;
+    };
+  } catch {
+    return undefined;
+  }
+  const { BedrockRuntimeClient, ConverseCommand } = sdk;
+  const client = new BedrockRuntimeClient({ region });
+  return {
+    complete: async (req) => {
+      const requestBody = {
+        modelId: req.model_id,
+        system: [{ text: req.system as unknown as string }],
+        messages: [
+          {
+            role: 'user',
+            content: [{ text: req.user as unknown as string }],
+          },
+        ],
+        inferenceConfig: { maxTokens: req.max_output_tokens },
+        toolConfig: {
+          tools: [
+            {
+              toolSpec: {
+                name: 'emit_project_briefing',
+                description: 'Emit the project briefing fields.',
+                inputSchema: { json: req.response_schema },
+              },
+            },
+          ],
+          toolChoice: { tool: { name: 'emit_project_briefing' } },
+        },
+      };
+      const cmd = new ConverseCommand(requestBody);
+      const response = (await client.send(cmd)) as {
+        readonly output?: {
+          readonly message?: {
+            readonly content?: ReadonlyArray<{
+              readonly toolUse?: { readonly input: unknown };
+            }>;
+          };
+        };
+        readonly usage?: { readonly totalTokens?: number };
+      };
+      const content = response.output?.message?.content ?? [];
+      const toolUseBlock = content.find((b) => b.toolUse !== undefined);
+      const parsed = toolUseBlock?.toolUse?.input ?? {};
+      const totalTokens = response.usage?.totalTokens ?? 0;
+      return {
+        parsed_output: parsed,
+        model_id: req.model_id,
+        cost_units: totalTokens,
+      };
+    },
+  };
+}
+
 export function buildScanCommand(deps: ScanCommandDeps): Command {
   const veyraDev = deps.envReader('VEYRA_DEV') === '1';
   const cmd = new Command('scan')
@@ -1227,11 +2235,51 @@ export function buildScanCommand(deps: ScanCommandDeps): Command {
       '--ai-model <model-id>',
       `AI model id passed to the provider adapter (default ${DEFAULT_AI_MODEL})`,
     )
+    .option(
+      '--loop-budget <spec>',
+      'agentic-loop budget overrides as key=value,…  (calls,wall_ms,cost,steps); e.g. calls=40,wall_ms=300000',
+    )
+    // Step 40c-v3 Mode B options (Step 40 addendum + anon-key — per
+    // 40c-v3 decisions document; argv-NAME only for every secret-bearing
+    // env var, never the value).
+    .option(
+      '--approve-active',
+      'Mode B sandbox active-validation requires explicit operator approval. Required for --mode sandbox_active_validation.',
+      false,
+    )
+    .option(
+      '--supabase-sandbox <project_ref>',
+      'Mode B sandbox project_ref (the dev/sandbox Supabase project Veyra creates synthetic data in). Required for --mode sandbox_active_validation. Must NOT match the read-only --supabase project.',
+    )
+    .option(
+      '--supabase-service-role-key <ENV_VAR_NAME>',
+      'Mode B: env-var NAME (not the value) of the service-role key for the sandbox project. The value is read from the named env var at runtime; the value never appears on argv (CLAUDE.md §Secrets).',
+    )
+    .option(
+      '--supabase-anon-key <ENV_VAR_NAME>',
+      'Mode B: env-var NAME (not the value) of the anon key for the sandbox project. Symmetric with --supabase-service-role-key. The anon key is not a secret per Supabase docs but the env-var-NAME-on-argv pattern is preserved for consistency.',
+    )
+    .option(
+      '--ci',
+      'CI mode for Mode B: requires --approval-file <path>. CI runs cannot prompt interactively.',
+      false,
+    )
+    .option(
+      '--approval-file <path>',
+      'Mode B CI: path to the signed approval file. Signature verification is the documented open item per phases/phase-2-improvement/decisions.md.',
+    )
     .action(async (raw: Record<string, unknown>) => {
       const parsed = parseRawOptions(raw);
       const result = await runScan(parsed, deps);
       if (!result.ok) {
         throw result.error;
+      }
+      // Step 31d codex §6.5-r2 MUST #4: propagate `runScan`'s exitCode via
+      // Node's `process.exitCode` (idiomatic). `cli/index.ts` reads it after
+      // `parseAsync` returns. Without this propagation, `--fail-on-blocker`
+      // was silently a no-op at the CLI surface.
+      if (result.value.exitCode !== 0) {
+        process.exitCode = result.value.exitCode;
       }
     });
   if (veyraDev) {
@@ -1281,6 +2329,7 @@ export function defaultScanCommandDeps(): ScanCommandDeps {
     now: () => new Date(),
     random: () => randomUUID().slice(0, 8),
     envReader: (name) => process.env[name],
+    rawArgvProvider: () => process.argv.slice(2),
     providerRegistry: createDefaultProviderRegistry(),
   };
 }
@@ -1306,6 +2355,16 @@ function parseRawOptions(raw: Record<string, unknown>): ScanOptions {
     ...maybeString('aiConcernThreshold', raw.aiConcernThreshold),
     ...maybeString('aiCacheTtl', raw.aiCacheTtl),
     ...maybeString('aiModel', raw.aiModel),
+    // Step 31d: `--loop-budget` carries through to `parseLoopCliOptions` on
+    // the Bedrock loop path.
+    ...maybeString('loopBudget', raw.loopBudget),
+    // Step 40c-v3 Mode B options (Step 40 addendum + anon-key).
+    approveActive: raw.approveActive === true,
+    ...maybeString('supabaseSandbox', raw.supabaseSandbox),
+    ...maybeString('supabaseServiceRoleKey', raw.supabaseServiceRoleKey),
+    ...maybeString('supabaseAnonKey', raw.supabaseAnonKey),
+    ci: raw.ci === true,
+    ...maybeString('approvalFile', raw.approvalFile),
   };
 }
 

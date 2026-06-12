@@ -26,6 +26,20 @@ export interface LoopTraceSummary {
   readonly budget_consumed: BudgetSnapshot;
 }
 
+/**
+ * Step 40c-v3 Decision D — one row per active-validation probe in the
+ * rendered Markdown's "Active-validation outcomes" section. Distinct from
+ * `findings` (which only emits for launch-blocker cases); every observed
+ * probe contributes one row here, including `proven_denial` (the expected
+ * non-finding case).
+ */
+export interface ActiveOutcomeRow {
+  readonly probe_id: string;
+  readonly control_id: string;
+  readonly outcome: 'proven_denial' | 'proven_allowed' | 'inconclusive';
+  readonly expectation: 'expect_denial' | 'expect_allow';
+}
+
 export interface AgenticReportInput {
   readonly narrative_prose: string;
   readonly findings: readonly Finding[];
@@ -36,6 +50,24 @@ export interface AgenticReportInput {
    * hard-fail). A `--no-ai` scan also surfaces here.
    */
   readonly narrative_used_fallback: boolean;
+  /**
+   * Step 40c-v3 Decision D — per-probe outcome rows (Mode B). When undefined
+   * or empty, only the trace-counts variant of the section renders. When
+   * non-empty, an explicit per-probe table renders ABOVE the trace counts
+   * so an operator sees the actual outcomes (V6b).
+   */
+  readonly active_outcomes?: readonly ActiveOutcomeRow[];
+  /**
+   * Step 40d Decision G — one-line audit pointer to `project-briefing.json`
+   * when the briefing was synthesized. Rendered under "Scan metadata" as
+   * a footer reference; NEVER a rendered section. The flag distinguishes
+   * the `degraded_fallback` case so an operator sees the briefing did not
+   * land its AI-assisted form.
+   */
+  readonly project_briefing_ref?: {
+    readonly basename: string;
+    readonly degraded: boolean;
+  };
 }
 
 const SECTION_NARRATIVE = '## Narrative';
@@ -44,6 +76,7 @@ const SECTION_CARDS = '## Per-control cards (audit appendix)';
 const SECTION_ACTIVE_OUTCOMES = '## Active-validation outcomes';
 const SECTION_COVERAGE_GAPS = '## Coverage gaps';
 const SECTION_TRACE = '## Loop-trace summary';
+const SECTION_SCAN_METADATA = '## Scan metadata';
 
 /** Build the markdown report. */
 export function renderAgenticReport(input: AgenticReportInput): string {
@@ -71,6 +104,10 @@ export function renderAgenticReport(input: AgenticReportInput): string {
 
   // 4. Active-validation outcomes (currently surfaced via the trace).
   parts.push(SECTION_ACTIVE_OUTCOMES);
+  if (input.active_outcomes !== undefined && input.active_outcomes.length > 0) {
+    parts.push(renderActiveOutcomeRows(input.active_outcomes));
+    parts.push('');
+  }
   parts.push(renderActiveOutcomes(input.trace));
   parts.push('');
 
@@ -83,7 +120,24 @@ export function renderAgenticReport(input: AgenticReportInput): string {
   parts.push(SECTION_TRACE);
   parts.push(renderTraceSummary(input.trace));
 
+  // 7. Scan metadata (Step 40d Decision G): one-line audit pointer to the
+  // briefing artifact when synthesized. Never a section; never rendered
+  // briefing field content.
+  if (input.project_briefing_ref !== undefined) {
+    parts.push('');
+    parts.push(SECTION_SCAN_METADATA);
+    parts.push(renderBriefingFooter(input.project_briefing_ref));
+  }
+
   return parts.join('\n');
+}
+
+function renderBriefingFooter(ref: {
+  readonly basename: string;
+  readonly degraded: boolean;
+}): string {
+  const suffix = ref.degraded ? ' (degraded)' : '';
+  return `- Project briefing: ${ref.basename}${suffix}`;
 }
 
 function renderRootCause(findings: readonly Finding[]): string {
@@ -132,6 +186,34 @@ function renderActiveOutcomes(trace: LoopTraceSummary): string {
     `- result-rejects: ${String(trace.result_rejects)}`,
     `- sub-agent errors: ${String(trace.subagent_errors)}`,
   ].join('\n');
+}
+
+/**
+ * Step 40c-v3 Decision D / codex §6.5 MF-3 — render one row per active probe
+ * outcome (Mode B). Uses allowed-claim vocab ("checked", "observed",
+ * "needs human review"); `proven_denial` rows are visible AS OUTCOMES but
+ * never as Findings.
+ */
+function renderActiveOutcomeRows(
+  rows: readonly ActiveOutcomeRow[],
+): string {
+  const lines: string[] = [];
+  for (const row of rows) {
+    const verdictPhrase =
+      row.outcome === 'proven_allowed'
+        ? row.expectation === 'expect_denial'
+          ? 'appears launch-blocking and needs human review'
+          : 'observed access matched expectation'
+        : row.outcome === 'proven_denial'
+          ? row.expectation === 'expect_denial'
+            ? 'denial was checked and observed (no finding emitted)'
+            : 'expected-allowed access was denied; needs human review'
+          : 'outcome inconclusive; needs human review';
+    lines.push(
+      `- \`${row.probe_id}\` (control \`${row.control_id}\`, expectation \`${row.expectation}\`): observed \`${row.outcome}\` — ${verdictPhrase}.`,
+    );
+  }
+  return lines.join('\n');
 }
 
 function renderCoverageGaps(

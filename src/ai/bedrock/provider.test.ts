@@ -15,26 +15,32 @@ const HAS_LIVE_AWS =
   (process.env['AWS_REGION'] ?? process.env['AWS_DEFAULT_REGION'] ?? '').length > 0;
 
 describe('Bedrock provider — auth from env only (Verification a/d)', () => {
-  it('rejects missing AWS_ACCESS_KEY_ID', () => {
-    const r = readAwsCredentials(() => undefined);
+  it('rejects when region is unset', async () => {
+    const r = await readAwsCredentials({ env: () => undefined });
     expect(isErr(r)).toBe(true);
   });
 
-  it('reports presence (NOT the secret value) when env is set', () => {
+  it('reports resolved + region + source (NEVER the secret value) — step 31d', async () => {
     const env: Record<string, string> = {
-      AWS_ACCESS_KEY_ID: 'AKIA-TEST-NO-SECRET',
-      AWS_SECRET_ACCESS_KEY: 'never-leaves-env',
       AWS_REGION: 'us-east-1',
     };
-    const r = readAwsCredentials((n) => env[n]);
+    const r = await readAwsCredentials({
+      env: (n) => env[n],
+      // Stub the SDK chain so the test never touches the network or
+      // `@aws-sdk/credential-providers`.
+      chainLoader: async () => ({ providerName: 'IniProvider' }),
+    });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    // The returned object exposes presence flags + region only — never the
-    // raw key values.
     expect(Object.keys(r.value).sort()).toEqual(
-      ['hasAccessKeyId', 'hasSecretAccessKey', 'region'].sort(),
+      ['region', 'resolved', 'source'].sort(),
     );
-    expect((r.value as Record<string, unknown>)['secretAccessKey']).toBeUndefined();
+    expect(r.value.region).toBe('us-east-1');
+    expect(r.value.source).toBe('profile');
+    // Raw key values must NEVER appear on the returned object.
+    const serialised = JSON.stringify(r.value);
+    expect(serialised).not.toContain('AKIA');
+    expect(serialised).not.toContain('SECRET');
   });
 });
 

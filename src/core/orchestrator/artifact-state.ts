@@ -2,6 +2,15 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 
 import type { NamedFact, ToolResult } from '../../types/tool-result.js';
+// Step 40d Decision B: the briefing TYPE lives in src/cli/briefing/types.ts so
+// the briefing impl can import from src/agents/ai-product-understanding/ without
+// violating the no-cross-layer-imports invariant. The `import type` here is
+// erased at runtime; no source file under src/cli/briefing/ executes as a
+// consequence of this import. The `no-cross-layer-imports` test (src/types/
+// + src/core/ → /agents/, /connectors/, /scanners/, AI SDKs) does NOT forbid
+// `src/cli/` references.
+// eslint-disable-next-line import/no-relative-packages
+import type { ProjectBriefing } from '../../cli/briefing/types.js';
 
 /**
  * Append-only loop state (Phase 3 / Agentic Veyra, PLAN §B). Every loop event
@@ -63,6 +72,13 @@ export interface LoopView {
   }[];
   /** Accepted facts so far. Pass-through here; redacted in Step 34. */
   readonly facts: readonly NamedFact[];
+  /**
+   * Step 40d: pre-loop project briefing (read-only orchestration metadata).
+   * Set ONCE before the loop starts; immutable for the loop's lifetime; never
+   * mutated by `proposeNext` or by accepted facts. Absent when no briefing was
+   * synthesized (Phase-3 legacy paths + tests).
+   */
+  readonly briefing?: ProjectBriefing;
 }
 
 export interface ArtifactStateOptions {
@@ -74,6 +90,13 @@ export interface ArtifactStateOptions {
    * MUST be fire-and-forget — internal failures must not block state mutation.
    */
   readonly onRecord?: (record: LoopRecord) => void;
+  /**
+   * Step 40d: pre-loop project briefing. When present, every `readableView()`
+   * surfaces it under `view.briefing`. Stored verbatim — the briefing is
+   * synthesized in `src/cli/briefing/` BEFORE the loop runs and is never
+   * mutated thereafter.
+   */
+  readonly briefing?: ProjectBriefing;
 }
 
 /** Append-only loop state. */
@@ -236,6 +259,9 @@ export class ArtifactState {
         ...(r.tool_id === undefined ? {} : { tool_id: r.tool_id }),
       })),
       facts: this.collectAcceptedFacts(),
+      ...(this.options.briefing !== undefined
+        ? { briefing: this.options.briefing }
+        : {}),
     };
   }
 

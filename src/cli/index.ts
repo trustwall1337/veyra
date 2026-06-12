@@ -30,7 +30,10 @@ if (rawArgv[2] === '--') {
 
 try {
   await program.parseAsync(rawArgv);
-  process.exit(0);
+  // Step 31d codex §6.5-r2 MUST #4: respect `process.exitCode` if a
+  // sub-command set it (e.g. `--fail-on-blocker` via `runScan` ⇒ exit 1).
+  // Default to 0 when nothing set it.
+  process.exit(process.exitCode ?? 0);
 } catch (e) {
   if (e instanceof CliUsageError) {
     process.stderr.write(`veyra: ${e.message}\n`);

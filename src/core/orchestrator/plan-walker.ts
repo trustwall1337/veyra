@@ -21,6 +21,10 @@ import {
 } from './agentic-loop.js';
 import { runClassificationPredicates } from './floor.js';
 import {
+  type BudgetSnapshot,
+  DEFAULT_BUDGET_CAPS,
+} from './loop-budget.js';
+import {
   type LedgerGap,
   RequiredEvidenceLedger,
 } from './required-evidence-ledger.js';
@@ -204,11 +208,23 @@ export async function runPlanWalker(
   const floorFindings = runFloor(facts, ledgerMissing);
   const termination: LoopTermination =
     ledgerMissing.length > 0 ? 'early_done' : 'done';
+  // Step 31d: AgenticLoopResult.budget_snapshot is now required. The plan-
+  // walker has no AI driver and no real budget — synthesise a zero-cost
+  // snapshot against DEFAULT_BUDGET_CAPS so the reporter bridge stays
+  // statically typed end-to-end.
+  const budget_snapshot: BudgetSnapshot = {
+    tool_calls: 0,
+    steps: 0,
+    cost_units: 0,
+    elapsed_ms: 0,
+    caps: DEFAULT_BUDGET_CAPS,
+  };
   return {
     termination,
     findings: [...floorFindings, ...writeProbeGaps],
     facts,
     ledgerMissing,
     state,
+    budget_snapshot,
   };
 }

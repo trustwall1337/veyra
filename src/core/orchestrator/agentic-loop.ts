@@ -40,6 +40,7 @@ import {
 import {
   type BudgetCaps,
   type BudgetLike,
+  type BudgetSnapshot,
   DEFAULT_BUDGET_CAPS,
   Budget,
 } from './loop-budget.js';
@@ -148,6 +149,13 @@ export interface AgenticLoopResult {
   readonly facts: readonly NamedFact[];
   readonly ledgerMissing: readonly LedgerGap[];
   readonly state: ArtifactState;
+  /**
+   * Step 31d: budget snapshot taken once at loop exit (before the floor
+   * runs). Fed to the markdown reporter's `LoopTraceSummary.budget_consumed`.
+   * Required so the bridge from `AgenticLoopResult` to `renderAgenticReport`
+   * is statically typed end-to-end.
+   */
+  readonly budget_snapshot: BudgetSnapshot;
 }
 
 export interface RunAgenticLoopDeps {
@@ -171,6 +179,15 @@ export interface RunAgenticLoopDeps {
   readonly authorizeSpawn?: AuthorizeSpawn;
   readonly deriveSubScope?: DeriveSubScope;
   /**
+   * Step 31d: pre-seed the trace snapshot's `model_id` before any envelope
+   * arrives. The Bedrock path passes its `defaultModelId` here so EVERY
+   * trace row carries `model_id` — including rows for driver-error and
+   * first-iteration budget-halt cases that fire before `proposeNext`
+   * returns. Other providers may leave undefined (V6 only enforces on the
+   * Bedrock CLI route).
+   */
+  readonly requiredModelId?: string;
+  /**
    * Stable-alias redactor (Step 34). Default = `createRedactor()`. Tool
    * results are redacted before re-entering the AI view and before any digest
    * lands in the audit trail.
@@ -181,6 +198,17 @@ export interface RunAgenticLoopDeps {
    * `<artifactDir>/loop-trace.jsonl` durably per-step.
    */
   readonly traceWriter?: LoopTraceWriter;
+  /**
+   * Step 40d: pre-loop project briefing (read-only orchestration metadata).
+   * When set, every `view` handed to `proposeNext` carries `view.briefing`.
+   * Optional; absent on legacy Phase-3 paths.
+   */
+  readonly briefing?: import('../../cli/briefing/types.js').ProjectBriefing;
+  /**
+   * Step 40d V4: sha256 of the persisted briefing minus `recorded_at`. When
+   * set, ROW 0 of the trace JSONL carries it; subsequent rows do not.
+   */
+  readonly briefingDigest?: string;
 }
 
 const DEFAULT_STALL_WINDOW = 5;
@@ -219,22 +247,38 @@ export async function runAgenticLoop(
   );
 
   // ── Per-iteration mutable snapshot — read by the `onRecord` hook.
+  // Step 31d: `requiredModelId` (when set, e.g. the Bedrock path) pre-seeds
+  // `modelId` so EVERY trace row carries it — including driver-error and
+  // first-iteration budget-halt rows that fire before `proposeNext` returns.
   const snapshot: {
     viewDigest: string;
     modelId: string | undefined;
     promptFingerprint: string | undefined;
     subagentTarget: TargetDescriptor | undefined;
+    /**
+     * Step 40d V4: present only until the first trace row is emitted.
+     * Cleared to `undefined` immediately after, so only row 0 carries
+     * `briefing_digest`.
+     */
+    briefingDigest: string | undefined;
   } = {
     viewDigest: '',
-    modelId: undefined,
+    modelId: deps.requiredModelId,
     promptFingerprint: undefined,
     subagentTarget: undefined,
+    briefingDigest: deps.briefingDigest,
   };
 
   // Trace hook: one JSONL row per state record. Fire-and-forget; serialised
   // inside the writer so byte order is preserved.
   const onRecord = (record: LoopRecord): void => {
-    void traceWriter.writeStep(mapRecordToTraceRow(record, snapshot, budget, {
+    const rowSnapshot = { ...snapshot };
+    // Step 40d V4: clear the briefing-digest channel AFTER reading it once so
+    // only row 0 (the first emitted record) ships `briefing_digest`.
+    if (snapshot.briefingDigest !== undefined) {
+      snapshot.briefingDigest = undefined;
+    }
+    void traceWriter.writeStep(mapRecordToTraceRow(record, rowSnapshot, budget, {
       policyHash,
       descriptorHash,
     }));
@@ -243,6 +287,7 @@ export async function runAgenticLoop(
   const state = new ArtifactState({
     artifactDir: deps.artifactDir,
     onRecord,
+    ...(deps.briefing !== undefined ? { briefing: deps.briefing } : {}),
   });
 
   const fullScope: ReadonlySet<ToolId> = new Set(
@@ -298,7 +343,12 @@ export async function runAgenticLoop(
         break;
       }
       childBudget.addCost(envelope.cost_units ?? 0);
-      snapshot.modelId = envelope.model_id;
+      // Step 31d: keep the pre-seeded `requiredModelId` when the envelope
+      // doesn't carry one (other providers may omit). Only overwrite when
+      // the envelope explicitly sets it.
+      if (envelope.model_id !== undefined) {
+        snapshot.modelId = envelope.model_id;
+      }
       snapshot.promptFingerprint = envelope.prompt_fingerprint_sha256;
 
       const parsed = aiProposalSchema.safeParse(envelope.proposal);
@@ -513,6 +563,9 @@ export async function runAgenticLoop(
   const facts = state.collectAcceptedFacts();
   const ledgerMissing = ledger.missing(state);
   const findings = runFloor(facts, ledgerMissing);
+  // Step 31d: snapshot the budget ONCE at loop exit so the reporter's
+  // `LoopTraceSummary.budget_consumed` is statically typed end-to-end.
+  const budget_snapshot = budget.snapshot();
 
   return {
     termination: term.value ?? 'done',
@@ -520,6 +573,7 @@ export async function runAgenticLoop(
     facts,
     ledgerMissing,
     state,
+    budget_snapshot,
   };
 }
 
@@ -552,6 +606,11 @@ function mapRecordToTraceRow(
     readonly modelId: string | undefined;
     readonly promptFingerprint: string | undefined;
     readonly subagentTarget: TargetDescriptor | undefined;
+    /**
+     * Step 40d V4: present only on the FIRST trace row emitted in this scan;
+     * the caller (the loop's `onRecord` hook) clears it after row 0 lands.
+     */
+    readonly briefingDigest: string | undefined;
   },
   budget: { snapshot: () => import('./loop-budget.js').BudgetSnapshot },
   hashes: {
@@ -584,6 +643,9 @@ function mapRecordToTraceRow(
       : {}),
     ...(record.depth === 0 || record.depth === 1
       ? { subagent_depth: record.depth as 0 | 1 }
+      : {}),
+    ...(snapshot.briefingDigest !== undefined
+      ? { briefing_digest: snapshot.briefingDigest }
       : {}),
   };
 

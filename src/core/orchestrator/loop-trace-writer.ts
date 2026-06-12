@@ -58,6 +58,13 @@ export interface LoopTraceRow {
   readonly subagent_id?: string;
   readonly subagent_target?: TargetDescriptor;
   readonly subagent_depth?: 0 | 1;
+
+  /**
+   * Step 40d V4: sha256 over the persisted briefing minus `recorded_at`. Set
+   * ONLY on row 0 (the first emitted trace row) when a briefing was
+   * synthesized pre-loop; every subsequent row omits this field.
+   */
+  readonly briefing_digest?: string;
 }
 
 export interface LoopTraceWriter {

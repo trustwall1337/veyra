@@ -67,6 +67,10 @@ const FORBIDDEN_ARGV_FLAGS: readonly string[] = [
   '--service-role-key',
   '--aws-access-key-id',
   '--aws-secret-access-key',
+  // Step 31d: AWS session tokens (STS) are credentials too. The SDK reads
+  // them from `AWS_SESSION_TOKEN` env; a CLI flag here would defeat the
+  // env-only rule (CLAUDE.md §Secrets).
+  '--aws-session-token',
   '--password',
   '--api-key',
 ];

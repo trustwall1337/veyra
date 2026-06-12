@@ -93,6 +93,31 @@ export interface LocalFileSource {
 }
 
 /**
+ * Active-validation probe response (Phase 3 / Step 40c). Emitted by
+ * `probe-http` (`src/scanners/probe-http/tool.ts`) after running a Step 39
+ * probe-primitive against PostgREST. The body is NEVER persisted; only
+ * structural facts the deterministic outcome-classifier dispatches on.
+ */
+export interface ProbeResponseSource {
+  readonly kind: 'probe_response';
+  readonly probe_id: string;
+  readonly control_id: string;
+  readonly payload: ProbeResponsePayload;
+}
+
+/**
+ * Sanitized payload for a `ProbeResponseSource`. Whitelisted fields only;
+ * no body, no classification keys.
+ */
+export interface ProbeResponsePayload {
+  readonly response_status: number;
+  readonly response_returned_rows: boolean;
+  readonly response_size_bytes: number;
+  readonly response_digest: string;
+  readonly expectation: 'expect_denial' | 'expect_allow';
+}
+
+/**
  * Discriminated union over the *generic* observation kinds. The
  * discriminator value is intentionally NOT a provider name — provider
  * identity lives in the opaque `*_id` fields per `FPP §2A` rule 1.
@@ -101,7 +126,8 @@ export type ScanFactSource =
   | ScannerMatchSource
   | SchemaElementSource
   | McpResponseSource
-  | LocalFileSource;
+  | LocalFileSource
+  | ProbeResponseSource;
 
 export type ScanFactSourceKind = ScanFactSource['kind'];
 

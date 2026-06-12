@@ -106,6 +106,13 @@ const LEGACY_DIRECT_WRITE_FILES: ReadonlySet<string> = new Set([
   'agents/sandbox-runner/agent.ts',
   'core/sandbox/http-write-registry.ts',
   'core/sandbox/http-write-registry.test.ts',
+  // Step 40c-v3 Decision G.5: probe-http uses its own `ProbeHttpTransport`
+  // surface and records audit-only WriteEntries (`cleanup_strategy:
+  // 'audit_only'`) — the reverse-walk no-ops on them. The structural lint
+  // greps for the literal string `transport.send(`, so probe-http is
+  // explicitly allowlisted; the audit_only contract is what keeps cleanup
+  // safe.
+  'scanners/probe-http/tool.ts',
 ]);
 const LEGACY_DIRECT_WRITE_PREFIXES: readonly string[] = [
   // The Phase 2 test catalog (each test case calls `transport.send` directly;

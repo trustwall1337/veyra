@@ -94,7 +94,8 @@ export function containsClassificationKey(value: unknown): boolean {
     // discriminator via its `name` value (e.g. `{name:'finding_type', value:'x'}`)
     // even though `name` and `value` are not classification keys themselves.
     // Reject when `name` is a string matching the classification key set.
-    if (typeof obj['name'] === 'string' && CLASSIFICATION_KEY_SET.has(obj['name'])) {
+    const maybeName = obj.name;
+    if (typeof maybeName === 'string' && CLASSIFICATION_KEY_SET.has(maybeName)) {
       return true;
     }
   }
@@ -158,5 +159,4 @@ export const toolResultBaseSchema = z
  * {@link toolResultBaseSchema}. (Resolves the step-30 review note that deferred
  * a typed helper to Step 33.)
  */
-export const toolResultSchema: z.ZodType<ToolResult> =
-  toolResultBaseSchema as unknown as z.ZodType<ToolResult>;
+export const toolResultSchema: z.ZodType<ToolResult> = toolResultBaseSchema;

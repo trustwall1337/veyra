@@ -4,7 +4,6 @@ import type {
 } from '../../core/orchestrator/agentic-loop.js';
 import type { LoopView } from '../../core/orchestrator/artifact-state.js';
 import { type ProviderId, asProviderId } from '../../types/identity.js';
-import { isErr } from '../../types/result.js';
 import type { ToolDescriptorView } from '../../core/tools/descriptor.js';
 
 /**
@@ -116,23 +115,10 @@ export function recordedBedrockTransport(
 }
 
 /**
- * Live transport stub: throws unless the caller wires the real AWS SDK. We
- * intentionally do NOT import `@aws-sdk/client-bedrock-runtime` from this
- * file — the import would broaden the dependency surface and require live
- * creds for tests. A future step adds the SDK wiring; for now the live path
- * is a no-op skipped by env-gated tests (Phase 2 step 01 preventer 7).
+ * Live Bedrock transport — moved to `./transport-live.ts` in Step 31d. Kept
+ * as a re-export so existing imports of `liveBedrockTransport` from
+ * `./provider.js` continue to compile. The live transport lazy-imports
+ * `@aws-sdk/client-bedrock-runtime` inside `invokeModel`, so a `--no-ai`
+ * scan and the recorded-fixture test paths never load the SDK.
  */
-export function liveBedrockTransport(): BedrockTransport {
-  return {
-    invokeModel: async () => {
-      const credsErr = isErr(
-        (await import('./auth.js')).readAwsCredentials(),
-      );
-      throw new Error(
-        credsErr
-          ? 'live Bedrock transport requires AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_REGION in env'
-          : 'live Bedrock transport not wired in this build — recorded-fixture transport must be used',
-      );
-    },
-  };
-}
+export { liveBedrockTransport } from './transport-live.js';

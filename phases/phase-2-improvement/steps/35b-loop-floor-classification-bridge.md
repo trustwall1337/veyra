@@ -1,0 +1,95 @@
+# Step 35b — Wire per-control predicates into the loop's deterministic floor (close the 31d smoke-run classification gap)
+
+**Status:** done (2026-05-29) — predicate registry imports the 11 per-control predicates from `src/agents/{authn,authz-tenant,supabase-rls,business-logic}/predicates.ts`; bridge `named-fact-to-scan-fact.ts` lossless round-trip implemented; floor.ts accepts injected predicates; verified end-to-end against the fixture (27 findings incl. 1 launch-blocker on cc-11-8). Status header formally landed alongside 40c-v3's dependency-contract assertion (work was complete earlier in this session; explicit update deferred until now).
+
+**Maps to:** `phases/phase-2-improvement/PLAN.md` §B (floor as sole classifier, post-loop), §D.1 (result-parse-or-reject boundary — predicates read only accepted facts), §D.2 (sole `Finding` constructor; import-graph guard); `phases/phase-2-improvement/steps/35-deterministic-floor-classification.md` (the "Phase-3 minimum" floor it explicitly defers); `phases/phase-2-improvement/steps/31d-bedrock-live-transport-and-loop-runtime-wiring.md` Verification V1 (closes the gap the 31d smoke run exposed: scanners ran, results were accepted, yet the loop emitted only 2 ledger `coverage_gap`s and no per-control cards / launch-blocker on cc-11-8 / likely_issues on cc-11-10).
+
+**Phase:** 3, Cut 1 (between 35 and 41 — required so 41's fixture gate can compare against the `--no-ai` baseline).
+
+**Produces:**
+
+- A new typed bridge `src/core/orchestrator/named-fact-to-scan-fact.ts`: a pure inverse of `scanFactsToToolResult(...)` (`src/scanners/scan-fact-tool-result.ts:12-31`) that walks `readonly NamedFact[]` produced by `ArtifactState.collectAcceptedFacts()` (`src/core/orchestrator/artifact-state.ts:222-228`) back into `readonly ScanFact[]`. The bridge is a `Result<readonly ScanFact[], NamedFactDecodeError>` over a Zod parse of the flattened `NamedFact` tree so a malformed nest fails the same way `result_schema.safeParse` already fails on the way in — never throws, never re-classifies.
+- A new typed predicate registry `src/core/orchestrator/floor-predicates.ts`: an ordered, checked-in `readonly` array `FLOOR_PREDICATES: readonly FloorPredicate[]` where each entry is `{ predicate_id: string; control_ids: readonly string[]; run: (facts: readonly ScanFact[]) => readonly Finding[] }`. The registry IMPORTS — does not re-implement — every existing per-control predicate listed in the gap table (`src/agents/{authn,authz-tenant,supabase-rls,business-logic}/predicates.ts`). The registry also imports the direct-scanner-hit constructors from `src/agents/tool-runner/tool-runner.ts:482-550` (`scannerFinding`, `coverageGapFinding`) as a `scannerHitFindings(facts)` adapter that reconstructs the `Finding`s the topo path emits for cc-11-7 / cc-11-8 / cc-11-10 from the scanner-match facts already in `state`. Adding the 13th-onwards predicate is one append, never a switch.
+- Amendment to `src/core/orchestrator/floor.ts` (`runClassificationPredicates`): the function (a) calls the bridge to obtain `readonly ScanFact[]`, (b) iterates `FLOOR_PREDICATES` and concatenates their `Finding[]`, (c) appends the ledger `coverage_gap`s exactly as today, (d) returns the stable, deterministic union. On bridge decode failure the function records the failure as a `Finding` of `finding_type: 'coverage_gap'` on a synthetic control id `cc-11-internal-fact-decode` (no AI path to this — the floor authors it) and continues with the ledger gaps; this preserves "floor always runs" (§D.1).
+- Amendment to `scanFactsToToolResult(...)` (`src/scanners/scan-fact-tool-result.ts:16-29`): the inner-fields list is extended to round-trip `source.kind` + `source.scanner_id` / `source.parser_id` / `source.connector_id` + `source.payload.rule_id` + `source.payload.content_kind` + `source.payload.sanitized_excerpt` + `args_fingerprint_sha256` + (for `schema_element`) `element_kind` + `name` + (for `mcp_response`) `tool` + `response_digest`. Every field is a `NamedFact` so the whitelist contract (`src/types/tool-result.ts:114-136`) is preserved; no classification key is emitted at any depth (the existing recursive guard test stays green). The bridge of the previous bullet is the inverse of this extension.
+- No new control ids. No new finding shapes. No new ArtifactKind. No new policy gate.
+
+**Depends on:** 30 (whitelist `ToolResult` + `NamedFact`), 31 (loop + `collectAcceptedFacts`), 33 (registered concrete read-only tool descriptors — the registry the floor is downstream of), 35 (the Phase-3-minimum floor this step extends — preserves its three §D.2 tests).
+
+**Executed by:** plain coding pass + `plan-adherence` skill (assert no decision deviates from PLAN §B/§D/§K) + `output-language-lint` skill on every new predicate summary line (none should appear, but the test asserts) + `step-reviewer` + codex single review.
+
+## Verification
+
+`pnpm test --run` green; `pnpm typecheck` green; `pnpm lint` green. Enforceable assertions:
+
+1. **Loop-path parity with `--no-ai` baseline on the fixture.** Test: run a Bedrock loop-path scan against `examples/vulnerable-lovable-supabase/` with the recorded transport from step 31d, AND a `--no-ai` plan-walker scan against the same fixture; for each scan collect `findings.map(f => ({ control_id, finding_type, id }))`, sort by `id`, assert the two sets are equal. Both scans must produce (a) the launch-blocker on cc-11-8 originating from the gitleaks JWT at `src/lib/secrets.ts:8`, (b) at least 8 likely_issue findings on cc-11-10 originating from OSV axios CVE hits, (c) one per-control card for each of the 12 active controls (cc-11-1 … cc-11-12) that the topo-path baseline produces today. This is the load-bearing assertion — failure means the gap is not closed.
+
+2. **§D.2(iii) import-graph guard still green.** Test: re-run the existing checked-in import-graph walk in `src/cli/finding-unreachable-from-tools.test.ts` (or whatever filename Step 35 landed it as) after this step. Assert `Finding` (`src/types/finding.ts`) is unreachable from every registered concrete tool's `invoke`. The new bridge + predicate registry live under `src/core/orchestrator/`, NOT under `src/scanners/*/tool.ts` / `src/connectors/*/tools/*` / `src/agents/*/tools/*`, so the walk's reachable set from any registered tool's `invoke` is unchanged. Explicit assertion: `src/core/orchestrator/floor-predicates.ts` is in the walk's set of files reachable from `src/core/orchestrator/floor.ts` but is NOT in the walk's set reachable from any registered tool entrypoint.
+
+3. **`--no-ai` baseline byte-identical to today.** Test: snapshot-diff the existing `readiness-report.md` + `readiness-report.json` produced by the `--no-ai` fixture scan against the post-change run. Assert byte-equal. (The topo-sort path's `composeReport()` at `src/agents/evidence-report/agent.ts:195-226` is not touched by this step; the plan-walker invokes the floor identically to the loop, so the floor's new behaviour must produce the same finding set the topo path produces today. If it does not, the topo path stays canonical and the loop path is wrong — this assertion catches that.)
+
+4. **Predicate-registry matrix test (synthetic facts → expected findings).** New test in `src/core/orchestrator/floor-predicates.test.ts`: for each of the 12 active controls, hand-author one minimal `NamedFact[]` (round-tripped through `scanFactsToToolResult` + the new bridge so the round-trip itself is exercised) that should fire exactly that control's predicate. Assert the registry returns at least one `Finding` whose `control_id` matches and whose `finding_type` matches the topo path's expectation today (`'likely_issue'` for cc-11-1/2/3/4/5/6/9/11, `'confirmed_issue'` for the canonical cc-11-7 service-role key + cc-11-8 gitleaks hit, `'likely_issue'` for cc-11-10 OSV, `'coverage_gap'` for cc-11-12 when no bucket fact is present). Adding a 13th predicate row is a one-line registry append; the test grows by one row.
+
+5. **§D.1 result-boundary preserved.** Test: drive `runAgenticLoop` with a stub driver whose tool returns a result carrying a top-level `finding_type` key. Assert the loop records `tool_result_reject`, `state.collectAcceptedFacts()` does NOT contain that result's fields, the new bridge is therefore never given a classification-bearing input, AND the floor still runs and emits the ledger `coverage_gap`s. (Re-runs the V1 + V3 contract from Step 31d against the new floor.)
+
+6. **Bridge decode failure becomes a coverage_gap, never a throw.** Test: hand a `NamedFact[]` that round-trip-fails (e.g. a `source_kind` value the closed `ScanFactSource` union does not recognize) directly to `runClassificationPredicates(...)`. Assert it returns at least one `Finding` with `control_id: 'cc-11-internal-fact-decode'` + `finding_type: 'coverage_gap'` + the ledger gaps, never throws, and never produces a non-`coverage_gap` finding.
+
+7. **Round-trip lossless for the fields predicates read.** Test: for a representative set of `ScanFact[]` (one per `ScanFactSource.kind`: `scanner_match` from each scanner id, `schema_element` for `table` + `policy` + `bucket`, `mcp_response`, `local_file`), call `scanFactsToToolResult(input)` → bridge back to `readonly ScanFact[]` → assert deep-equal for every field the predicates dispatch on (`source.kind`, `source.scanner_id` / `parser_id` / `connector_id`, `source.payload.rule_id`, `source.payload.sanitized_excerpt`, `source.payload.content_kind`, `fact_id`, `file_path`, `line`, `redacted`, `observed_at`, `args_fingerprint_sha256`, plus the schema_element / mcp_response shape fields). Stable ordering preserved (no Set-iteration leakage).
+
+8. **Predicate registry determinism.** Test: invoke `runClassificationPredicates(facts, gaps)` twice with the same input. Assert the two outputs are deep-equal AND identically ordered. Predicates iterate in `FLOOR_PREDICATES` declaration order; ledger gaps are appended in `gaps` order; no `Map` / `Set` iteration on user-supplied keys leaks into the output.
+
+9. **No new classification key escapes the boundary.** Test: assert `containsClassificationKey(scanFactsToToolResult(<every fixture ScanFact set>))` returns `false` for every kind the extended emit now serializes (the existing recursive guard in `src/types/tool-result.ts:83-103` runs against the output of the extended `scanFactsToToolResult`). Belt-and-suspenders that the extra round-trip fields did not silently widen the in-loop result shape.
+
+10. **Allowed-claims vocabulary preserved on the loop-path rendered report (CLAUDE.md §Output language).** Test: render the Markdown report from the Bedrock-loop-path scan in V1 through `renderAgenticReport(...)` (the bridge from step 31d). Assert the forbidden-words regex returns zero matches AND the allowed-verbs set ("checked", "found", "missing", "appears launch-blocking", "needs human review", "likely") appears at least three times across the rendered narrative + cards. (The existing predicate summaries already use this vocabulary; this test pins it on the agentic path that now exercises them.)
+
+## Goal
+
+Close the floor-classification gap the 31d Bedrock smoke run exposed without weakening any §D.2 trust invariant. Today the loop path runs every scanner, every result is `result_validation: "accepted"`, and yet the rendered report contains only 2 ledger `coverage_gap`s — because `runClassificationPredicates(_facts, gaps)` at `src/core/orchestrator/floor.ts:45-53` discards `facts` and only maps `gaps`. The 12 per-control predicates that produce the topo-path's 17-card report live in `src/agents/*/predicates.ts` and dispatch on `ScanFact.source.scanner_id` + `ScanFact.source.payload.rule_id` — fields the loop's `NamedFact[]` carries (after this step's extension to `scanFactsToToolResult`) but does not expose at the top level.
+
+The step does two things together:
+- (i) makes the loop's `NamedFact` shape **lossless** for the fields predicates dispatch on (so the existing predicates can run unchanged),
+- (ii) imports every existing per-control predicate into a single deterministic registry the floor iterates, with the direct-scanner-hit constructors from `tool-runner.ts:482-550` reconstructed as one more registry entry so cc-11-7 / cc-11-8 / cc-11-10 land on both paths from the same code.
+
+After this step the floor is one place — both code paths (loop + `--no-ai` plan-walker) hit it. The Phase-3-minimum coverage_gap deferral from Step 35 is closed.
+
+## What lands
+
+- **Extended `scanFactsToToolResult` (`src/scanners/scan-fact-tool-result.ts`).** Adds round-trip fields the predicates dispatch on (`source.kind`, scanner/parser/connector ids, `rule_id`, `content_kind`, `sanitized_excerpt`, `args_fingerprint_sha256`, and the kind-specific `element_kind`/`name`/`tool`/`response_digest`). Every added field is a `NamedFact` so the whitelist contract is preserved (no classification key at any depth — the existing `tool-result.test.ts` runtime guard test re-runs and stays green).
+- **New `src/core/orchestrator/named-fact-to-scan-fact.ts`.** A pure `Result`-returning inverse of the extended emit. Walks the flat `NamedFact[]` tree, parses with a Zod schema that mirrors `ScanFact` (`src/types/scan-fact.ts:108-116`), and returns `Result<readonly ScanFact[], NamedFactDecodeError>`. Never throws.
+- **New `src/core/orchestrator/floor-predicates.ts`.** A typed registry `FLOOR_PREDICATES: readonly FloorPredicate[]` with one entry per per-control predicate listed in the gap table — re-exporting the functions from `src/agents/{authn,authz-tenant,supabase-rls,business-logic}/predicates.ts` unchanged — plus one entry `scannerHitFindings` that reconstructs the cc-11-7 / cc-11-8 / cc-11-10 direct-scanner-hit `Finding`s from the accepted scanner-match facts (uses the existing classification map at `src/agents/tool-runner/tool-runner.ts:104-147` via a thin pure function — no new classification table).
+- **Amended `src/core/orchestrator/floor.ts:runClassificationPredicates`.** Calls the bridge → iterates the registry → appends the ledger `coverage_gap`s → returns. Decode failure path: a synthetic `cc-11-internal-fact-decode` coverage_gap, never a throw.
+- **No changes** to: the loop driver, the gate, the result-parse-or-reject boundary, the budget, the ledger, the trace-writer, the redactor, the CLI argv, the report renderer, the topo-path orchestrator, or any policy file. This step is contained to the floor + the fact-shape bridge.
+
+## Done when
+
+All ten Verification assertions pass. A Bedrock-loop-path scan against `examples/vulnerable-lovable-supabase/` produces the same per-control card set + launch-blocker on cc-11-8 + likely_issues on cc-11-10 as the `--no-ai` plan-walker scan against the same fixture. The `--no-ai` baseline is byte-identical to today. The §D.2(iii) import-graph guard stays green. No new ArtifactKind, no new policy gate, no new CLI flag.
+
+## Guardrails
+
+- **PLAN §D.1 (result-parse-or-reject):** unchanged. The new bridge runs *after* the loop's `result_schema.safeParse` — it reads only persisted, accepted facts via `state.collectAcceptedFacts()`. A malformed result never reaches the bridge.
+- **PLAN §D.2 (floor is sole `Finding` constructor):** preserved. The new predicate registry lives in `src/core/orchestrator/`, not in any registered tool's `invoke` reachable set. The import-graph guard re-asserts this in V2. The per-control predicates already construct `Finding`s in the topo path; moving the *call site* into the floor does not move the *construction site* anywhere the AI can reach — predicates are pure functions of `ScanFact[]` and the floor calls them after the loop has terminated.
+- **CLAUDE.md §Output language:** predicates' existing summary strings already use the allowed vocabulary ("appears", "needs human review", "likely"). V10 re-asserts on the rendered loop-path report.
+- **CLAUDE.md §Secrets:** the extended `scanFactsToToolResult` round-trips `payload.sanitized_excerpt` — which is already redacted at scanner time (gitleaks `--redact` at `tool-runner.ts:114`, sanitization pass for semgrep/OSV). No raw secret is widened by this step. V9 asserts the whitelist contract still passes.
+- **CLAUDE.md §MCP discipline:** the bridge reads only fields the loop has already accepted; the MCP allowlist + `read_only=true` + `project_ref` invariants are upstream of the floor and untouched.
+- **CLAUDE.md §Validation policy:** the predicates for cc-11-5 / cc-11-6 / cc-11-9 / cc-11-12 require Supabase schema + storage metadata. Without `--supabase <project_ref>` those facts are absent on both paths today; the predicates emit `coverage_gap` accordingly (per `predicatePublicBucket` at `supabase-rls/predicates.ts:286-300`). This step does NOT wire the schema/storage tool descriptors into the loop catalog — that is Step 33's surface area and a separate decision (Decision 3 below).
+- **PHASE_1_PLAN §6 / FPP §18 scope discipline:** no dashboard, no Slack, no PR comment, no autonomous remediation, no compliance claim. The step is contained to two new files + amendments to two existing files.
+
+## References
+
+- `phases/phase-2-improvement/PLAN.md` §B (loop body + floor), §D.1 (result-parse-or-reject), §D.2 (sole `Finding` constructor + import-graph guard), §K (ledger gaps remain authoritative for coverage).
+- `phases/phase-2-improvement/steps/35-deterministic-floor-classification.md` (the Phase-3-minimum deferral this step closes).
+- `phases/phase-2-improvement/steps/31d-bedrock-live-transport-and-loop-runtime-wiring.md` Verification V1 (the assertion this step finally makes pass on a real fixture).
+- `phases/phase-2-improvement/steps/41-agentic-fixture-gate.md` (the downstream fixture gate that depends on this step's parity claim).
+- `CLAUDE.md` §Output language, §Secrets, §MCP discipline, §Validation policy, §Resolved engineering decisions.
+- `src/core/orchestrator/floor.ts:45-53` (the function this step amends).
+- `src/core/orchestrator/artifact-state.ts:222-228` (`collectAcceptedFacts` — the floor's only input).
+- `src/scanners/scan-fact-tool-result.ts:12-31` (the emit this step extends; the bridge is its inverse).
+- `src/types/scan-fact.ts:108-116` (`ScanFact` shape the bridge produces).
+- `src/types/tool-result.ts:57-152` (whitelist contract + recursive guard — preserved).
+- `src/agents/authn/predicates.ts:60-102` (cc-11-1, cc-11-2).
+- `src/agents/authz-tenant/predicates.ts:83-176` (cc-11-3, cc-11-4).
+- `src/agents/supabase-rls/predicates.ts:180-300` + `:395-421` (cc-11-5, cc-11-6, cc-11-9, cc-11-12, cc-11-7 env-name half).
+- `src/agents/business-logic/predicates.ts:121-133` (cc-11-11).
+- `src/agents/tool-runner/tool-runner.ts:104-147` (per-scanner classification map), `:482-550` (`coverageGapFinding` + `scannerFinding` — the direct-scanner-hit constructors that produce cc-11-7 / cc-11-8 / cc-11-10).
+- `src/agents/evidence-report/controls.ts` (canonical 17 controls; this step targets the 12 active ones — cc-11-13a–e remain `coverage_gap` until sandbox-runner Mode B lands in Cut 3).
+- `src/cli/finding-unreachable-from-tools.test.ts` (the §D.2(iii) import-graph guard re-asserted by V2).

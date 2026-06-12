@@ -17,6 +17,29 @@
 /** Internal write classification — not a provider taxonomy. */
 export type WriteKind = 'http' | 'admin';
 
+/**
+ * Cleanup strategy for a {@link WriteEntry} (Step 40c-v3 Decision G.5).
+ *
+ *  - `'reverse'`: the reverse-walk MUST call the executor to undo the side-
+ *    effect (POST/PUT/PATCH/DELETE; Admin createUser / signIn that needs
+ *    signOut+deleteUser).
+ *  - `'audit_only'`: the entry is a recorded audit trail of a non-mutating
+ *    interaction (e.g. a probe-http `GET` request the AI proposed). The
+ *    reverse-walk no-ops on it; the entry contributes to `attempted` +
+ *    `succeeded` counters so the cleanup-proof shape stays stable.
+ *
+ * Default is `'reverse'`. The `audit_only` value is the safer-by-default
+ * exception: a forgetful `recordHttpWrite` caller for a GET would no-op
+ * cleanup as intended; a forgetful caller for a POST would trip the
+ * cleanup-failed predicate because the executor was never called — that
+ * is the desired failure mode.
+ */
+export type CleanupStrategy = 'audit_only' | 'reverse';
+
+export function assertExhaustiveCleanupStrategy(x: never): never {
+  throw new Error(`Unhandled CleanupStrategy: ${JSON.stringify(x)}`);
+}
+
 export interface WriteEntry {
   readonly id: string;
   readonly kind: WriteKind;
@@ -25,10 +48,12 @@ export interface WriteEntry {
   /** Redacted, audit-only description; never the raw request body. */
   readonly description_redacted: string;
   readonly recorded_at: string;
+  /** Step 40c-v3 Decision G.5; default `'reverse'`. */
+  readonly cleanup_strategy: CleanupStrategy;
 }
 
 export interface HttpWriteRequest {
-  readonly method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   readonly url: string;
   readonly body_redacted: string;
 }
@@ -67,6 +92,8 @@ export class WriteRegistry {
   recordHttpWrite(input: {
     readonly resource_id: string;
     readonly description_redacted: string;
+    /** Defaults to `'reverse'` (Decision G.5). Probe-http GET sets `'audit_only'`. */
+    readonly cleanup_strategy?: CleanupStrategy;
   }): WriteEntry {
     const entry: WriteEntry = {
       id: this.nextId('http'),
@@ -74,6 +101,7 @@ export class WriteRegistry {
       resource_id: input.resource_id,
       description_redacted: input.description_redacted,
       recorded_at: new Date().toISOString(),
+      cleanup_strategy: input.cleanup_strategy ?? 'reverse',
     };
     this.entries.push(entry);
     return entry;
@@ -83,6 +111,7 @@ export class WriteRegistry {
   recordAdminWrite(input: {
     readonly resource_id: string;
     readonly description_redacted: string;
+    readonly cleanup_strategy?: CleanupStrategy;
   }): WriteEntry {
     const entry: WriteEntry = {
       id: this.nextId('admin'),
@@ -90,6 +119,7 @@ export class WriteRegistry {
       resource_id: input.resource_id,
       description_redacted: input.description_redacted,
       recorded_at: new Date().toISOString(),
+      cleanup_strategy: input.cleanup_strategy ?? 'reverse',
     };
     this.entries.push(entry);
     return entry;
@@ -112,16 +142,32 @@ export class WriteRegistry {
     for (let i = this.entries.length - 1; i >= 0; i -= 1) {
       const entry = this.entries[i];
       if (entry === undefined) continue;
-      const executor =
-        entry.kind === 'http' ? executors.http : executors.admin;
-      try {
-        await executor(entry);
-        succeeded += 1;
-      } catch (cause) {
-        failures.push({
-          entry,
-          error_class: cause instanceof Error ? cause.name : 'UnknownError',
-        });
+      // Step 40c-v3 Decision G.5: audit-only entries are recorded for the
+      // audit trail but have no executor side-effect to undo (e.g. probe-http
+      // GET requests). They count toward `attempted` + `succeeded` so the
+      // cleanup-proof's accounting stays stable, but the executor is NEVER
+      // invoked for them.
+      switch (entry.cleanup_strategy) {
+        case 'audit_only':
+          succeeded += 1;
+          break;
+        case 'reverse': {
+          const executor =
+            entry.kind === 'http' ? executors.http : executors.admin;
+          try {
+            await executor(entry);
+            succeeded += 1;
+          } catch (cause) {
+            failures.push({
+              entry,
+              error_class:
+                cause instanceof Error ? cause.name : 'UnknownError',
+            });
+          }
+          break;
+        }
+        default:
+          assertExhaustiveCleanupStrategy(entry.cleanup_strategy);
       }
     }
     return {
